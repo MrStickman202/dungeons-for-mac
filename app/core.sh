@@ -11,6 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
+DFM_BUILD=2   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -79,11 +80,10 @@ MCL_URL="https://launcher.mojang.com/download/MinecraftInstaller.msi"
 # xgameruntime (the Xbox game runtime). Checksums come with each release.
 # ---------------------------------------------------------------------------
 DFM_BUILDS="${DFM_BUILDS:-https://github.com/MrStickman202/dungeons-for-mac/releases/download/latest-build}"
-STORE_PRODUCT="9P8MK4NC0LJB"          # Minecraft Dungeons for Windows (Microsoft.Lovika)
+DFM_APPREL="${DFM_APPREL:-https://github.com/MrStickman202/dungeons-for-mac/releases/download/app-latest}"
 CLIENT_DIR="$AS/client"
 XCLI="$CLIENT_DIR/xodus-cli"
 XSVC="$CLIENT_DIR/xodus-service"
-STORE_DIR="$AS/games/minecraft-dungeons-store"
 STORE_ENGINE_MARK="$ENG/.dfm-store-engine"
 
 # ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ wine_env() { # setup | game | launcher
   export DXMT_ALLOW_CROSS_PROCESS_SWAPCHAIN=1
   # No Windows shortcuts on the Mac desktop
   export WINEDLLOVERRIDES="winemenubuilder.exe=d"
-  unset WINEDLLPATH_PREPEND DXMT_CONFIG DXMT_METALFX_SPATIAL_SWAPCHAIN MTL_HUD_ENABLED
+  unset WINEDLLPATH_PREPEND DXMT_CONFIG DXMT_METALFX_SPATIAL_SWAPCHAIN MTL_HUD_ENABLED CX_D3DMETALPATH D3DM_MAX_FPS D3DM_ENABLE_METALFX
   unset DXVK_ASYNC DXVK_FRAME_RATE DYLD_INSERT_LIBRARIES
   ulimit -n 10240 2>/dev/null
 
@@ -186,8 +186,20 @@ wine_env() { # setup | game | launcher
         off)   export WINEESYNC=0 WINEMSYNC=0 ;;
         *)     export WINEMSYNC=1 WINEESYNC=0 ;;
       esac
-      local fps; fps=$(conf_get fps 60)
-      case "$(conf_get renderer dxmt)" in
+      local fps r; fps=$(conf_get fps 60)
+      r=$(conf_get renderer dxmt)
+      # A DirectX 12 game always takes D3DMetal; the Graphics setting is for DirectX 11 ones
+      [ "${GAME_RENDERER_FOR_LAUNCH:-}" = d3dmetal ] && r=d3dmetal
+      case "$r" in
+        d3dmetal)
+          # D3DMetal for 64-bit Direct3D 11/12, DXMT behind it for 32-bit Direct3D 11
+          export WINEDLLPATH_PREPEND="$D3DM/wine:$ENG/renderers/dxmt/wine"
+          export CX_D3DMETALPATH="$D3DM/external"
+          export DYLD_FALLBACK_LIBRARY_PATH="$DYLD_FALLBACK_LIBRARY_PATH:$D3DM/external"
+          export DYLD_FALLBACK_FRAMEWORK_PATH="$DYLD_FALLBACK_FRAMEWORK_PATH:$D3DM/external"
+          [ "$fps" != 0 ] && export D3DM_MAX_FPS="$fps" DXMT_CONFIG="d3d11.preferredMaxFrameRate=$fps;"
+          [ "$(conf_get metalfx 0)" = 1 ] && export D3DM_ENABLE_METALFX=1
+          ;;
         dxvk)
           export WINEDLLPATH_PREPEND="$FW/renderer/dxvk/wine"
           export WINEDLLOVERRIDES="$WINEDLLOVERRIDES;dxgi,d3d9,d3d10core,d3d11=n,b"
@@ -353,9 +365,9 @@ install_engine() {
   fi
   rm -rf "$tmp/frameworks"
   mv "$tmp/rt/$RT_SUBPATH" "$tmp/frameworks"
-  # D3DMetal (Apple-licensed) draws Dungeons' 3D world black, so it isn't kept
-  rm -rf "$tmp/rt" "$tmp/frameworks/renderer/d3dmetal" "$tmp/frameworks/renderer/apple_gptk" \
-         "$tmp/frameworks/SikarugirSdk.framework"
+  # D3DMetal (Apple-licensed) stays on disk but is only used for DirectX 12 games, and
+  # only after the person accepts Apple's licence in the app
+  rm -rf "$tmp/rt" "$tmp/frameworks/SikarugirSdk.framework"
 
   progress -1 "Installing DXMT..."
   mkdir -p "$tmp/x" "$tmp/renderers/dxmt"
@@ -631,13 +643,13 @@ job_import() { # folder copy|move [force]
 # ---------------------------------------------------------------------------
 # Microsoft Store copy
 # ---------------------------------------------------------------------------
-fetch_build() { # file dest label from to   (sha from <file>.sha256 in the same release)
-  local sha
-  sha=$(curl -fsSL --retry 3 "$DFM_BUILDS/$1.sha256" 2>>"$LOGS/download.log" | awk '{print $1}')
+fetch_build() { # file dest label from to [base]  (sha from <file>.sha256 in the same release)
+  local sha base="${6:-$DFM_BUILDS}"
+  sha=$(curl -fsSL --retry 3 "$base/$1.sha256" 2>>"$LOGS/download.log" | awk '{print $1}')
   case "$sha" in [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;; *)
     fail "No Mac build is published yet (github.com/MrStickman202/dungeons-for-mac). Try again later."; return 1 ;; esac
   printf '%s' "$sha" > "$2.expected"
-  download "$DFM_BUILDS/$1" "$2" "$sha" 0 "$3" "$4" "$5"
+  download "$base/$1" "$2" "$sha" 0 "$3" "$4" "$5"
 }
 
 install_store_engine() { # swap Highball's Wine for the Dungeons for Mac build (keeps DXMT etc.)
@@ -702,6 +714,43 @@ start_service() {
   [ -S "$XODUS_RUNTIME_DIR/xodus.sock" ]
 }
 
+# ---------------------------------------------------------------------------
+# Games. Built in: Minecraft Dungeons, Minecraft Bedrock. More can be added by
+# Microsoft Store product ID (Xbox PC / MSIXVC games only).
+#   id|name|store product|renderer|setup steps|folder under games/
+# ---------------------------------------------------------------------------
+BUILTIN_GAMES="dungeons|Minecraft Dungeons|9P8MK4NC0LJB|dxmt||minecraft-dungeons-store
+bedrock|Minecraft Bedrock (experimental)|9NBLGGH2JHXJ|d3dmetal|xcurl|minecraft-bedrock"
+
+game_line() { # id -> its registry line
+  local id="$1" c
+  c=$(printf '%s\n' "$BUILTIN_GAMES" | grep -E "^$id\|" | head -n 1)
+  [ -n "$c" ] && { printf '%s\n' "$c"; return 0; }
+  c=$(conf_get "custom_$id" "")
+  [ -n "$c" ] && printf '%s|%s|custom-%s\n' "$id" "$c" "$id"
+}
+
+game_ids() { # every known id, built-ins first
+  printf '%s\n' "$BUILTIN_GAMES" | cut -d'|' -f1
+  conf_get custom_games "" | tr ',' '\n' | grep -v '^$'
+}
+
+select_game() { # id: sets GAME_ID GAME_NAME STORE_PRODUCT GAME_RENDERER GAME_SETUP STORE_DIR EXE_KEY
+  local line
+  line=$(game_line "${1:-dungeons}")
+  [ -n "$line" ] || return 1
+  GAME_ID=$(printf '%s' "$line" | cut -d'|' -f1)
+  GAME_NAME=$(printf '%s' "$line" | cut -d'|' -f2)
+  STORE_PRODUCT=$(printf '%s' "$line" | cut -d'|' -f3)
+  GAME_RENDERER=$(printf '%s' "$line" | cut -d'|' -f4)
+  GAME_SETUP=$(printf '%s' "$line" | cut -d'|' -f5)
+  STORE_DIR="$AS/games/$(printf '%s' "$line" | cut -d'|' -f6)"
+  if [ "$GAME_ID" = dungeons ]; then EXE_KEY=store_exe; else EXE_KEY="store_exe_$GAME_ID"; fi
+  [ -n "$GAME_RENDERER" ] || GAME_RENDERER=dxmt
+  return 0
+}
+select_game dungeons
+
 store_config() { find "$STORE_DIR" -maxdepth 1 -type f -iname 'microsoftgame.config' 2>/dev/null | head -n 1; }
 
 store_exe() { # first <Executable Name="..."> in MicrosoftGame.config, as the package writes it
@@ -710,7 +759,54 @@ store_exe() { # first <Executable Name="..."> in MicrosoftGame.config, as the pa
   tr -d '\r' < "$cfg" | tr '\n' ' ' | sed -n 's/.*<Executable[^>]*Name="\([^"]*\)".*/\1/p' | head -n 1
 }
 
-store_ready() { [ -f "$STORE_DIR/.xodus-streaming.msixvc" ] && [ -n "$(conf_get store_exe "")" ]; }
+store_ready() { [ -f "$STORE_DIR/.xodus-streaming.msixvc" ] && [ -n "$(conf_get "$EXE_KEY" "")" ]; }
+
+cmd_games() { # id|name|state  (state: ready, notdownloaded, needs-licence)
+  local id state
+  for id in $(game_ids); do
+    select_game "$id" || continue
+    if store_ready; then state=ready; else state=notdownloaded; fi
+    if [ "$GAME_RENDERER" = d3dmetal ] && [ "$(conf_get d3dmetal_license 0)" != 1 ]; then
+      [ "$state" = ready ] && state=needs-licence
+    fi
+    printf '%s|%s|%s\n' "$GAME_ID" "$GAME_NAME" "$state"
+  done
+}
+
+cmd_add_game() { # name product  -> adds a custom Store game
+  local name="$1" product id list
+  product=$(printf '%s' "$2" | tr -cd 'A-Za-z0-9' | tr '[:lower:]' '[:upper:]')
+  name=$(printf '%s' "$name" | tr -d '|\n\r')
+  [ ${#product} -eq 12 ] || { echo "error|A Store product ID has 12 letters and numbers, like 9NBLGGH2JHXJ."; return 0; }
+  [ -n "$name" ] || name="Store game $product"
+  id=$(printf '%s' "$product" | tr '[:upper:]' '[:lower:]')
+  if game_ids | grep -qx "$id" || printf '%s\n' "$BUILTIN_GAMES" | cut -d'|' -f3 | grep -qx "$product"; then
+    echo "error|That game is already in the list."; return 0
+  fi
+  conf_set "custom_$id" "$name|$product|dxmt|"
+  list=$(conf_get custom_games "")
+  conf_set custom_games "${list:+$list,}$id"
+  echo "ok|$id"
+}
+
+cmd_remove_game() { # id: forget a custom game and delete its files
+  local id="$1" list
+  case "$id" in dungeons|bedrock|'') echo "error|Built-in games can't be removed from the list; use Delete game files."; return 0 ;; esac
+  select_game "$id" || { echo "error|unknown game"; return 0; }
+  case "$STORE_DIR" in "$AS"/games/?*) rm -rf "$STORE_DIR" ;; esac
+  conf_unset "custom_$id"; conf_unset "$EXE_KEY"
+  list=$(conf_get custom_games "" | tr ',' '\n' | grep -vx "$id" | paste -sd, -)
+  if [ -n "$list" ]; then conf_set custom_games "$list"; else conf_unset custom_games; fi
+  echo "ok|removed"
+}
+
+cmd_delete_files() { # id: delete the downloaded files (saves live in the Windows layer, not here)
+  select_game "$1" || { echo "error|unknown game"; return 0; }
+  if game_running || pgrep -f "$XCLI run" >/dev/null 2>&1; then echo "error|Quit the game first."; return 0; fi
+  case "$STORE_DIR" in "$AS"/games/?*) rm -rf "$STORE_DIR" ;; *) echo "error|unexpected folder"; return 0 ;; esac
+  conf_unset "$EXE_KEY"
+  echo "ok|Deleted the files of $GAME_NAME."
+}
 
 job_signin() {
   [ -x "$XCLI" ] || { fail "Run setup first."; return 1; }
@@ -727,14 +823,73 @@ job_signin() {
   okmsg "Signed in: $who"
 }
 
-job_storeinstall() {
+# --- per-game setup steps ---------------------------------------------------
+# xcurl: Microsoft's XCurl.dll (the GDK's HTTP layer) never gets a request onto
+# the wire under Wine, so a real Windows libcurl, which exports every curl_*
+# function the game imports, takes its place (Ferestre's finding for Bedrock).
+# Every download restores Microsoft's file, so this runs after each one.
+setup_xcurl() {
+  local dll tmp
+  dll=$(find "$STORE_DIR" -maxdepth 2 -type f -iname 'xcurl.dll' 2>/dev/null | head -n 1)
+  [ -n "$dll" ] || { log "xcurl: no XCurl.dll in $STORE_DIR"; return 0; }
+  if [ ! -f "$AS/curl/libcurl-x64.dll" ]; then
+    fetch_build dfm-curl.tar.gz "$DL/dfm-curl.tar.gz" "Downloading the network fix" 97 98 "$DFM_APPREL" || return 1
+    tmp=$(mktemp -d "$AS/unpack.XXXXXX") || return 1
+    tar -xzf "$DL/dfm-curl.tar.gz" -C "$tmp" && [ -f "$tmp/curl/libcurl-x64.dll" ] \
+      || { rm -rf "$tmp"; fail "The network fix download looks incomplete."; return 1; }
+    rm -rf "$AS/curl"; mv "$tmp/curl" "$AS/curl"; rm -rf "$tmp" "$DL/dfm-curl.tar.gz" "$DL/dfm-curl.tar.gz.expected"
+  fi
+  # keep Microsoft's original beside it (it carries the xcurl_* exports curl lacks)
+  if grep -aq 'xcurl_' "$dll" 2>/dev/null; then cp -f "$dll" "$dll.microsoft"; fi
+  cp -f "$AS/curl/libcurl-x64.dll" "$dll" || { fail "Couldn't install the network fix."; return 1; }
+  [ -f "$AS/curl/curl-ca-bundle.crt" ] && cp -f "$AS/curl/curl-ca-bundle.crt" "$(dirname "$dll")/curl-ca-bundle.crt"
+  log "xcurl: replaced $dll with libcurl"
+}
+
+run_game_setup() {
+  local step
+  for step in $(printf '%s' "$GAME_SETUP" | tr ',' ' '); do
+    case "$step" in
+      xcurl) setup_xcurl || return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# --- D3DMetal (DirectX 12) ---------------------------------------------------
+# Apple's D3DMetal ships inside the Sikarugir runtime this app already downloads.
+# It is Apple-licensed (Game Porting Toolkit licence: evaluation use, no
+# redistribution or modification), so it is only used after the person accepts
+# that licence in the app, and it is never modified.
+D3DM="$FW/renderer/d3dmetal"
+ensure_d3dmetal() {
+  [ -d "$D3DM/wine" ] && [ -d "$D3DM/external" ] && return 0
+  download "$RT_URL" "$DL/runtime.tar.xz" "$RT_SHA" "$RT_SIZE" "Downloading DirectX 12 support (D3DMetal)" 2 80 || return 1
+  local tmp; tmp=$(mktemp -d "$AS/unpack.XXXXXX") || return 1
+  progress -1 "Unpacking D3DMetal..."
+  if ! tar -xJf "$DL/runtime.tar.xz" -C "$tmp" "$RT_SUBPATH/renderer/d3dmetal" >> "$LOGS/setup.log" 2>&1 \
+     || [ ! -d "$tmp/$RT_SUBPATH/renderer/d3dmetal/wine" ]; then
+    rm -rf "$tmp"; fail "Couldn't unpack D3DMetal."; return 1
+  fi
+  rm -rf "$D3DM"; mv "$tmp/$RT_SUBPATH/renderer/d3dmetal" "$D3DM"; rm -rf "$tmp" "$DL/runtime.tar.xz"
+  log "d3dmetal installed"
+}
+
+cmd_d3dmetal_license() { # path of Apple's licence text, for the window to open
+  local f
+  for f in "$D3DM/License.rtf" "$D3DM/Read Me.rtf"; do [ -f "$f" ] && { echo "ok|$f"; return 0; }; done
+  echo "none|https://developer.apple.com/games/game-porting-toolkit/"
+}
+
+job_storeinstall() { # [game id]
+  select_game "${1:-dungeons}" || { fail "Unknown game."; return 1; }
   [ -x "$XCLI" ] || { fail "Run setup first."; return 1; }
   [ "$(conf_get signed_in 0)" = 1 ] || { fail "Sign in with your Microsoft account first."; return 1; }
   local gb; gb=$(free_gb "$AS")
-  [ "${gb:-0}" -ge 14 ] || { fail "Downloading Minecraft Dungeons needs about 14 GB free (this Mac has ${gb:-0} GB)."; return 1; }
+  [ "${gb:-0}" -ge 10 ] || { fail "Downloading $GAME_NAME needs at least 10 GB free (this Mac has ${gb:-0} GB)."; return 1; }
   client_env
   mkdir -p "$STORE_DIR"
-  progress 0 "Asking Microsoft for your copy of Minecraft Dungeons..."
+  progress 0 "Asking Microsoft for your copy of $GAME_NAME..."
   : > "$LOGS/store-download.log"
   ( XODUS_PROGRESS=json exec "$XCLI" streaming "$STORE_PRODUCT" "$STORE_DIR" ) > "$STATE/stream.out" 2>> "$LOGS/store-download.log" &
   local pid=$! line done_b total pct
@@ -744,8 +899,8 @@ job_storeinstall() {
     done_b=$(printf '%s' "$line" | sed -n 's/.*"done":\([0-9]*\).*/\1/p')
     total=$(printf '%s' "$line" | sed -n 's/.*"total":\([0-9]*\).*/\1/p')
     if [ -n "$total" ] && [ "$total" -gt 0 ] 2>/dev/null; then
-      pct=$(( done_b * 100 / total ))
-      progress "$pct" "Downloading Minecraft Dungeons from Microsoft - $(( done_b / 1048576 )) of $(( total / 1048576 )) MB"
+      pct=$(( done_b * 96 / total ))
+      progress "$pct" "Downloading $GAME_NAME from Microsoft - $(( done_b / 1048576 )) of $(( total / 1048576 )) MB"
     fi
     sleep 1
   done
@@ -754,7 +909,9 @@ job_storeinstall() {
   cat "$STATE/stream.out" >> "$LOGS/store-download.log" 2>/dev/null
   if [ $rc -ne 0 ] || [ ! -f "$STORE_DIR/.xodus-streaming.msixvc" ]; then
     if grep -qiE 'licen[cs]e|entitle|not owned|forbidden|403' "$LOGS/store-download.log"; then
-      fail "Microsoft says this account doesn't own Minecraft Dungeons for Windows. Sign in with the account that bought it."
+      fail "Microsoft says this account doesn't own $GAME_NAME. Sign in with the account that bought it."
+    elif grep -qiE 'uwp|appx|msixbundle|not an msixvc|Windows.Universal' "$LOGS/store-download.log"; then
+      fail "$GAME_NAME isn't an Xbox PC (MSIXVC) game, so it can't run here yet."
     else
       fail "The download stopped (code $rc). Press Download again to resume."
     fi
@@ -762,16 +919,18 @@ job_storeinstall() {
   fi
   local exe; exe=$(store_exe)
   [ -n "$exe" ] || { fail "Downloaded, but MicrosoftGame.config names no executable."; return 1; }
-  conf_set store_exe "$exe"
-  conf_set game_mode store
+  run_game_setup || return 1
+  if [ "$GAME_RENDERER" = d3dmetal ]; then ensure_d3dmetal || return 1; fi
+  conf_set "$EXE_KEY" "$exe"
+  [ "$GAME_ID" = dungeons ] && conf_set game_mode store
   progress 100 "Done"
-  okmsg "Minecraft Dungeons is downloaded. Press Play!"
+  okmsg "$GAME_NAME is downloaded. Press Play!"
 }
 
 # PlayStation and Switch pads: Wine prefers handing Sony controllers to games as
 # raw HID devices (for games with native DualShock/DualSense support) and drops
-# the SDL-mapped XInput version. Dungeons only understands XInput/GameInput pads,
-# so turn that preference off per vendor: 054c Sony, 057e Nintendo.
+# the SDL-mapped XInput version. These games only understand XInput/GameInput
+# pads, so turn that preference off per vendor: 054c Sony, 057e Nintendo.
 PADS_MARK="$PREFIX/.dfm-pads-1"
 apply_controller_settings() {
   [ -f "$PADS_MARK" ] && return 0
@@ -792,36 +951,42 @@ apply_controller_settings() {
 
 play_store() {
   local exe glog
-  exe=$(conf_get store_exe "")
+  exe=$(conf_get "$EXE_KEY" "")
+  if [ "$GAME_RENDERER" = d3dmetal ]; then
+    [ "$(conf_get d3dmetal_license 0)" = 1 ] || { echo "licence|$GAME_NAME needs Apple's D3DMetal, which needs you to accept Apple's licence first."; return 0; }
+    [ -d "$D3DM/wine" ] || { echo "error|DirectX 12 support isn't installed yet. Choose Download again."; return 0; }
+  fi
   start_service || { echo "error|The Xbox sign-in service didn't start. Choose More > Show Log."; return 0; }
   stop_server
   apply_controller_settings
   rotate_logs
   glog="$LOGS/game-$(date +%Y%m%d-%H%M%S).log"
-  printf 'Dungeons for Mac %s - Store copy, exe=%s\nrenderer=%s fps=%s sharp=%s sync=%s\n----\n' \
-    "$DFM_VERSION" "$exe" "$(conf_get renderer dxmt)" "$(conf_get fps 60)" "$(conf_get sharp 0)" "$(conf_get sync msync)" > "$glog"
+  printf 'Dungeons for Mac %s (build %s) - %s, exe=%s\nrenderer=%s fps=%s sharp=%s sync=%s\n----\n' \
+    "$DFM_VERSION" "$DFM_BUILD" "$GAME_NAME" "$exe" "$GAME_RENDERER" "$(conf_get fps 60)" "$(conf_get sharp 0)" "$(conf_get sync msync)" > "$glog"
   rm -f "$STATE/last_exit"
   mkdir -p "$AS/app"
   printf '#!/bin/bash\nexec /bin/bash %s __wine "$@"\n' "'$SELF'" > "$AS/app/wine-shim.sh" && chmod 755 "$AS/app/wine-shim.sh"
   cd "$STORE_DIR" || { echo "error|The game folder is missing."; return 0; }
+  export DFM_GAME="$GAME_ID"
   (
     trap '' HUP
     start=$(date +%s)
     # The client decrypts the game onto a RAM disk and starts "$SELF __wine",
-    # which sets the Metal/DXMT environment and execs this engine's wine.
+    # which sets the graphics environment and execs this engine's wine.
     "$XCLI" run -e "$exe" "$STORE_DIR" "$AS/app/wine-shim.sh"
     code=$?
     echo "$code $(( $(date +%s) - start ))" > "$STATE/last_exit"
   ) >> "$glog" 2>&1 < /dev/null &
-  log "play (store): $exe"
-  echo "ok|Starting Minecraft Dungeons."
+  log "play ($GAME_ID): $exe"
+  echo "ok|Starting $GAME_NAME."
 }
 
 cmd_wine_shim() { # called by xodus-cli as its "wine": inherited fds stay open across exec
+  select_game "${DFM_GAME:-dungeons}"
+  GAME_RENDERER_FOR_LAUNCH="$GAME_RENDERER"
   wine_env game
   client_env
   export WINE_GAMEINPUT=1
-  # Controller diagnostics: SDL loading, device arrival, XInput and GameInput warnings
   export WINEDEBUG="${DFM_WINEDEBUG:-fixme-all,warn+hid,warn+ginput,warn+xinput}"
   exec "$WINE" "$@"
 }
@@ -878,11 +1043,20 @@ rotate_logs() { # keep the 4 newest game logs (plus the one about to start)
   ls -t "$LOGS"/game-*.log 2>/dev/null | tail -n +5 | while IFS= read -r f; do rm -f "$f"; done
 }
 
-cmd_play() {
+cmd_play() { # [game id]
   if [ ! -f "$READY_MARK" ] || [ ! -f "$PREFIX_MARK" ]; then echo "error|Setup hasn't finished yet."; return 0; fi
   local exe target args root glog
+  if [ -n "$1" ] && [ "$1" != dungeons ]; then
+    select_game "$1" || { echo "error|Unknown game."; return 0; }
+    store_ready || { echo "error|$GAME_NAME isn't downloaded yet."; return 0; }
+    if pgrep -f "$XCLI run" >/dev/null 2>&1; then echo "running|A game is already running."; return 0; fi
+    if job_alive; then echo "error|Wait for the current task to finish first."; return 0; fi
+    play_store
+    return 0
+  fi
+  select_game dungeons
   if [ "$(conf_get game_mode launcher)" = store ] && store_ready; then
-    if game_running || pgrep -f "$XCLI run" >/dev/null 2>&1; then echo "running|Minecraft Dungeons is already running."; return 0; fi
+    if game_running || pgrep -f "$XCLI run" >/dev/null 2>&1; then echo "running|A game is already running."; return 0; fi
     if job_alive; then echo "error|Wait for the current task to finish first."; return 0; fi
     play_store
     return 0
@@ -1003,13 +1177,16 @@ cmd_diag() {
     echo; echo "== game folder"; ls -la "$(conf_get game_root "")" 2>/dev/null
     echo; echo "== controllers macOS sees"
     if is_mac; then ioreg -r -c IOHIDDevice -l 2>/dev/null | grep -E '"Product"|"PrimaryUsagePage"|"Transport"' | sed -n '1,60p'; fi
-    if [ -x "$XCLI" ] && [ -d "$STORE_DIR" ]; then
-      echo; echo "== store package identity"
+    echo; echo "== games"; cmd_games
+    for g in $(game_ids); do
+      select_game "$g" || continue
+      [ -x "$XCLI" ] && [ -d "$STORE_DIR" ] || continue
+      echo; echo "== $GAME_NAME: package identity"
       c=$(store_config); [ -n "$c" ] && tr -d '\r' < "$c" | grep -oiE '(TitleId|MSAAppId|StoreId|Identity Name|Executable Name)="?[^" >]*' | sort -u
-      echo; echo "== xbl-check (Xbox Live sign-in self-test; prints no tokens)"
+      echo; echo "== $GAME_NAME: xbl-check (Xbox Live sign-in self-test; prints no tokens)"
       client_env
-      "$XCLI" xbl-check "$STORE_DIR" 2>&1 | tail -n 60
-    fi
+      "$XCLI" xbl-check "$STORE_DIR" 2>&1 | tail -n 40
+    done
   } > "$dir/DungeonsForMac-diagnostics/summary.txt" 2>&1
   cp "$LOGS"/*.log "$dir/DungeonsForMac-diagnostics/" 2>/dev/null
   out="$HOME/Desktop/DungeonsForMac-diagnostics-$stamp.zip"
@@ -1126,6 +1303,8 @@ cmd_status() {
   echo "fps=$(conf_get fps 60)"
   echo "sharp=$(conf_get sharp 0)"
   echo "hud=$(conf_get hud 0)"
+  echo "metalfx=$(conf_get metalfx 0)"
+  echo "d3dmetal_license=$(conf_get d3dmetal_license 0)"
   echo "sync=$(conf_get sync msync)"
   echo "launch=$(conf_get launch direct)"
   echo "args=$(conf_get args "")"
@@ -1143,7 +1322,7 @@ cmd_set() { # key value
   case "$k" in
     renderer) case "$v" in dxmt|dxvk|wined3d) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     fps)      case "$v" in 0|30|60|120) ;; *) echo "error|bad value"; return 0 ;; esac ;;
-    sharp|hud) case "$v" in 0|1) ;; *) echo "error|bad value"; return 0 ;; esac ;;
+    sharp|hud|metalfx) case "$v" in 0|1) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     sync)     case "$v" in msync|esync|off) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     launch)   case "$v" in direct|bootstrap) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     args)     ;;
@@ -1184,7 +1363,13 @@ case "$cmd" in
   cancel)         cmd_cancel ;;
   detect)         cmd_detect "$1" ;;
   find-game)      cmd_find_game ;;
-  play)           cmd_play ;;
+  play)           cmd_play "$1" ;;
+  games)          cmd_games ;;
+  add-game)       cmd_add_game "$1" "$2" ;;
+  remove-game)    cmd_remove_game "$1" ;;
+  delete-files)   cmd_delete_files "$1" ;;
+  d3dmetal-license) cmd_d3dmetal_license ;;
+  accept-d3dmetal) conf_set d3dmetal_license 1; echo "ok|accepted" ;;
   stop)           cmd_stop ;;
   launcher-run)   cmd_launcher_run ;;
   set)            cmd_set "$1" "$2" ;;

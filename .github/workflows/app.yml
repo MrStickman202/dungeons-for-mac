@@ -1,0 +1,81 @@
+# Checks the app on a real Mac (shell syntax, AppleScript compile) and publishes it:
+#   app-latest/app.tar.gz          what the installed app's launcher updates itself from
+#   app-latest/Dungeons-for-Mac.zip a fresh copy of the app for new installs
+#   app-latest/dfm-curl.tar.gz      Windows libcurl that replaces XCurl.dll (Bedrock's network fix)
+name: app
+on:
+  push:
+    paths:
+      - app/**
+      - .github/workflows/app.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  # Pinned Windows curl build (Ferestre's pin): https://curl.se/windows/
+  CURL_WIN_VERSION: 8.22.0_1
+  CURL_WIN_SHA256: 7f23b039f6ea4197362d4468e1a0e71428201222e1bef3b680d5ef7b2aefb714
+jobs:
+  app:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: check scripts
+        run: |
+          set -euo pipefail
+          /bin/bash -n app/core.sh
+          /bin/bash -n app/launcher.sh
+          grep -qE '^DFM_BUILD=[0-9]+' app/core.sh
+          echo "build $(sed -n 's/^DFM_BUILD=\([0-9]*\).*/\1/p' app/core.sh)"
+      - name: compile the window (AppleScript)
+        run: |
+          set -euo pipefail
+          /usr/bin/osacompile -o "$RUNNER_TEMP/check.app" app/ui.applescript
+          echo "ui.applescript compiles"
+      - name: smoke-test the engine script
+        run: |
+          set -euo pipefail
+          export DFM_HOME="$RUNNER_TEMP/dfm-home/DungeonsForMac"
+          /bin/bash app/core.sh status
+          /bin/bash app/core.sh games
+          /bin/bash app/core.sh add-game "Test" 9PP5G1F0C2B6
+          /bin/bash app/core.sh games | grep -q '^9pp5g1f0c2b6|Test|notdownloaded$'
+          /bin/bash app/core.sh remove-game 9pp5g1f0c2b6
+      - name: Windows libcurl for the XCurl swap
+        run: |
+          set -euo pipefail
+          curl -sSfL -o curl.zip "https://curl.se/windows/dl-${CURL_WIN_VERSION}/curl-${CURL_WIN_VERSION}-win64-mingw.zip"
+          echo "${CURL_WIN_SHA256}  curl.zip" | shasum -a 256 -c -
+          mkdir -p x curl && unzip -q curl.zip -d x
+          cp "$(find x -name libcurl-x64.dll | head -1)" curl/libcurl-x64.dll
+          ca=$(find x -name curl-ca-bundle.crt | head -1); [ -n "$ca" ] && cp "$ca" curl/curl-ca-bundle.crt
+          cp "$(find x -iname 'COPYING*' | head -1)" curl/COPYING.txt 2>/dev/null || true
+          tar -czf dfm-curl.tar.gz curl
+          shasum -a 256 dfm-curl.tar.gz | tee dfm-curl.tar.gz.sha256
+      - name: package
+        run: |
+          set -euo pipefail
+          mkdir -p pkg/app
+          cp app/core.sh app/ui.applescript app/launcher.sh app/AppIcon.icns pkg/app/
+          tar -C pkg -czf app.tar.gz app
+          shasum -a 256 app.tar.gz | tee app.tar.gz.sha256
+          A="pkg/Dungeons for Mac.app/Contents"
+          mkdir -p "$A/MacOS" "$A/Resources"
+          cp app/Info.plist "$A/"
+          printf 'APPL????' > "$A/PkgInfo"
+          cp app/launcher.sh "$A/MacOS/DungeonsForMac"
+          cp app/core.sh app/ui.applescript app/AppIcon.icns "$A/Resources/"
+          chmod 755 "$A/MacOS/DungeonsForMac" "$A/Resources/core.sh"
+          codesign --force --deep --sign - "pkg/Dungeons for Mac.app"
+          (cd pkg && ditto -c -k --keepParent "Dungeons for Mac.app" ../Dungeons-for-Mac.zip)
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete app-latest -R "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          gh release create app-latest -R "${{ github.repository }}" --prerelease \
+            --title "App (build $(sed -n 's/^DFM_BUILD=\([0-9]*\).*/\1/p' app/core.sh), ${GITHUB_SHA::7})" \
+            --notes "The app updates itself from here. Fresh install: download Dungeons-for-Mac.zip, unzip, move to Applications, right-click > Open the first time." \
+            app.tar.gz app.tar.gz.sha256 Dungeons-for-Mac.zip dfm-curl.tar.gz dfm-curl.tar.gz.sha256

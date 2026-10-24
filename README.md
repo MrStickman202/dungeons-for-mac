@@ -21,16 +21,20 @@ ported to macOS:
    `xgameruntime.dll`, an open implementation of the Xbox game runtime.
 3. **Graphics**: [DXMT](https://github.com/3Shain/dxmt) turns Direct3D 11 into
    Apple Metal.
-4. **App** (`app/`): one window to set up, sign in, download and play.
+4. **App** (`app/`): a small launcher: set up, sign in, then pick a game to
+   download and play.
 
 ## Status
 
-| Part | State |
-|---|---|
-| Patch port onto CrossOver 26.3 (79 commits in `engine/series/wine`) | done, compile-checked |
-| xgameruntime on macOS (service socket) | ported |
-| Mac engine build (GitHub Actions, Intel runner) | building |
-| Xodus client for macOS (28 commits in `engine/series/xodus`) | building |
-| Minecraft Dungeons (Store, MSIXVC) | untested |
+| Game | Store ID | Graphics | State |
+|---|---|---|---|
+| Minecraft Dungeons | 9P8MK4NC0LJB | DXMT (Direct3D 11 → Metal) | **plays** on an M2 MacBook Air: Xbox sign-in, ownership, saves, PlayStation pads |
+| Minecraft Bedrock | 9NBLGGH2JHXJ | D3DMetal (Direct3D 12, Apple licence) | experimental, untested; XCurl replaced by libcurl as Ferestre does |
+| Other Xbox PC games | add by Store ID | DXMT | unknown per game |
+
+The app updates itself from the `app-latest` release; the engine and client
+come from `latest-build`. Fresh install: download `Dungeons-for-Mac.zip` from
+the [app-latest release](../../releases/tag/app-latest), move it to
+Applications, right-click → Open the first time.
 
 See [NOTICE.md](NOTICE.md) for components and licences.

@@ -30,8 +30,14 @@ on dlg(msg, btns, defBtn)
 	try
 		set r to display dialog msg buttons btns default button defBtn with title "Dungeons for Mac" with icon (path to resource "applet.icns")
 	on error errMsg number errNum
-		if errNum is -128 then error number -128
-		set r to display dialog msg buttons btns default button defBtn with title "Dungeons for Mac"
+		-- a button named "Cancel" raises -128; treat it as that button, not as quitting
+		if errNum is -128 then return "Cancel"
+		try
+			set r to display dialog msg buttons btns default button defBtn with title "Dungeons for Mac"
+		on error number errNum2
+			if errNum2 is -128 then return "Cancel"
+			error number errNum2
+		end try
 	end try
 	return button returned of r
 end dlg
@@ -191,41 +197,174 @@ on mainLoop()
 				set res to my runJob("setup", "Setting up Dungeons for Mac")
 				my reportResult(res, "Setup finished.")
 			end if
-		else if (my valueFor(statusRaw, "game")) is not "1" then
-			if (my valueFor(statusRaw, "signed_in")) is not "1" then
-				set b to my dlg(my signInText(), {"Quit", "More...", "Sign In"}, "Sign In")
-				if b is "Quit" then return
-				if b is "More..." then
-					if (my moreMenu()) is "quit" then return
-				else
-					set res to my runJob("signin", "Signing in to Microsoft")
-					my reportResult(res, "Signed in.")
-				end if
+		else if (my valueFor(statusRaw, "signed_in")) is not "1" and (my valueFor(statusRaw, "game")) is not "1" then
+			set b to my dlg(my signInText(), {"Quit", "More...", "Sign In"}, "Sign In")
+			if b is "Quit" then return
+			if b is "More..." then
+				if (my moreMenu()) is "quit" then return
 			else
-				set b to my dlg(my downloadText(), {"Quit", "More...", "Download"}, "Download")
-				if b is "Quit" then return
-				if b is "More..." then
-					if (my moreMenu()) is "quit" then return
-				else
-					set res to my runJob("storeinstall", "Downloading Minecraft Dungeons")
-					my reportResult(res, "Downloaded.")
-				end if
+				set res to my runJob("signin", "Signing in to Microsoft")
+				my reportResult(res, "Signed in.")
 			end if
 		else
-			set b to my dlg(my readyText(statusRaw), {"More...", "Settings...", "Play"}, "Play")
-			if b is "Play" then
-				if my startGame() then return
-			else if b is "Settings..." then
-				my settingsMenu()
-			else
-				if (my moreMenu()) is "quit" then return
-			end if
+			if (my gamesMenu()) is "quit" then return
 		end if
 	end repeat
 end mainLoop
 
+-- ---------------------------------------------------------------------------
+-- Game library
+-- ---------------------------------------------------------------------------
+on stateLabel(gameState)
+	if gameState is "ready" then return "Ready to play"
+	if gameState is "needs-licence" then return "Ready (needs Apple's licence)"
+	return "Not downloaded"
+end stateLabel
+
+on gamesMenu()
+	set rawGames to my core("games")
+	set ids to {}
+	set names to {}
+	set states to {}
+	set opts to {}
+	repeat with ln in (paragraphs of rawGames)
+		set parts to my splitBar(ln as text)
+		if (count of parts) >= 3 then
+			set end of ids to item 1 of parts
+			set end of names to item 2 of parts
+			set end of states to item 3 of parts
+			set end of opts to (item 2 of parts) & "  -  " & my stateLabel(item 3 of parts)
+		end if
+	end repeat
+	set end of opts to "Add a game by Store ID..."
+	set end of opts to "Settings..."
+	set end of opts to "More..."
+	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Your games:" default items {item 1 of opts} OK button name "Open" cancel button name "Quit"
+	if pick is false then return "quit"
+	set pick to item 1 of pick
+	if pick is "Add a game by Store ID..." then
+		my addStoreGame()
+		return "back"
+	else if pick is "Settings..." then
+		my settingsMenu()
+		return "back"
+	else if pick is "More..." then
+		return my moreMenu()
+	end if
+	repeat with i from 1 to count of opts
+		if (item i of opts) is pick then
+			if i <= (count of ids) then return my gameMenu(item i of ids, item i of names, item i of states)
+		end if
+	end repeat
+	return "back"
+end gamesMenu
+
+on gameMenu(gameId, gameName, gameState)
+	if gameState is "notdownloaded" then
+		set extra to ""
+		if gameId is "bedrock" then set extra to return & return & my bedrockNote()
+		set b to my dlg(gameName & return & return & "Not downloaded yet. Dungeons for Mac asks Microsoft for your copy and downloads it. If your account doesn't own it, Microsoft refuses and nothing is downloaded." & extra, {"Back", "More...", "Download"}, "Download")
+		if b is "Download" then
+			set res to my runJob("storeinstall " & gameId, "Downloading " & gameName)
+			my reportResult(res, "Downloaded.")
+		else if b is "More..." then
+			my gameMoreMenu(gameId, gameName)
+		end if
+		return "back"
+	end if
+	set b to my dlg(gameName & return & return & "Ready to play." & my gameExtraText(gameId), {"Back", "More...", "Play"}, "Play")
+	if b is "Play" then
+		if my startStoreGame(gameId, gameName) then return "quit"
+	else if b is "More..." then
+		my gameMoreMenu(gameId, gameName)
+	end if
+	return "back"
+end gameMenu
+
+on gameExtraText(gameId)
+	if gameId is "bedrock" then return return & return & "Experimental. Graphics run on Apple's D3DMetal (DirectX 12). Vibrant Visuals shows up in the game's Video settings only if D3DMetal reports the features it needs on this Mac."
+	if gameId is "dungeons" then return return & return & "Graphics: DXMT (Metal). Change the frame cap and sharpness in Settings."
+	return ""
+end gameExtraText
+
+on bedrockNote()
+	return "Minecraft Bedrock is experimental here. It uses DirectX 12, which runs on Apple's D3DMetal from the Game Porting Toolkit. The first launch asks you to accept Apple's licence for it."
+end bedrockNote
+
+on startStoreGame(gameId, gameName)
+	set r to my core("play " & quoted form of gameId)
+	if r starts with "licence" then
+		if not (my acceptD3DMetal()) then return false
+		set r to my core("play " & quoted form of gameId)
+	end if
+	if r starts with "ok" then
+		display notification "Starting " & gameName & ". The first launch can take a minute or two." with title "Dungeons for Mac"
+		return true
+	else if r starts with "running" then
+		my dlg(my afterBar(r), {"OK"}, "OK")
+	else
+		my dlg(my afterBar(r), {"OK"}, "OK")
+	end if
+	return false
+end startStoreGame
+
+on acceptD3DMetal()
+	repeat
+		set b to my dlg("DirectX 12 games run on Apple's D3DMetal, part of Apple's Game Porting Toolkit. It isn't made by Dungeons for Mac, and Apple's licence allows it for evaluating games on your own Mac (not commercial use, and it may not be modified or shared)." & return & return & "Choose Accept to agree to Apple's licence and use it.", {"Cancel", "Read Licence", "Accept"}, "Accept")
+		if b is "Accept" then
+			my core("accept-d3dmetal")
+			return true
+		else if b is "Read Licence" then
+			set r to my core("d3dmetal-license")
+			try
+				do shell script "/usr/bin/open " & quoted form of (my afterBar(r))
+			end try
+		else
+			return false
+		end if
+	end repeat
+end acceptD3DMetal
+
+on gameMoreMenu(gameId, gameName)
+	set opts to {"Re-download / update", "Delete game files"}
+	if gameId is not "dungeons" and gameId is not "bedrock" then set end of opts to "Remove from the list"
+	set pick to choose from list opts with title "Dungeons for Mac" with prompt gameName & ":" OK button name "Select" cancel button name "Back"
+	if pick is false then return
+	set pick to item 1 of pick
+	if pick starts with "Re-download" then
+		set res to my runJob("storeinstall " & gameId, "Downloading " & gameName)
+		my reportResult(res, "Downloaded.")
+	else if pick starts with "Delete" then
+		set b to my dlg("Delete the downloaded files of " & gameName & "? You can download it again any time. Saves and settings live in the Windows layer and are kept.", {"Cancel", "Delete"}, "Cancel")
+		if b is "Delete" then my dlg(my afterBar(my core("delete-files " & quoted form of gameId)), {"OK"}, "OK")
+	else if pick starts with "Remove" then
+		set b to my dlg("Remove " & gameName & " from the list and delete its files?", {"Cancel", "Remove"}, "Cancel")
+		if b is "Remove" then my dlg(my afterBar(my core("remove-game " & quoted form of gameId)), {"OK"}, "OK")
+	end if
+end gameMoreMenu
+
+on addStoreGame()
+	try
+		my addStoreGameSteps()
+	on error number errNum
+		if errNum is not -128 then error number errNum
+	end try
+end addStoreGame
+
+on addStoreGameSteps()
+	set d to display dialog "Add an Xbox PC game you own from the Microsoft Store." & return & return & "Paste its Store product ID: the 12 letters and numbers at the end of its apps.microsoft.com or xbox.com link (for example 9NBLGGH2JHXJ)." & return & return & "Only Xbox PC games (MSIXVC) work, and many still won't run under Wine." default answer "" buttons {"Cancel", "Next"} default button "Next" with title "Dungeons for Mac"
+	set productId to text returned of d
+	set d2 to display dialog "What should it be called in your list?" default answer "" buttons {"Cancel", "Add"} default button "Add" with title "Dungeons for Mac"
+	set r to my core("add-game " & quoted form of (text returned of d2) & " " & quoted form of productId)
+	if r starts with "ok" then
+		my dlg("Added. Open it from your games list to download it.", {"OK"}, "OK")
+	else
+		my dlg(my afterBar(r), {"OK"}, "OK")
+	end if
+end addStoreGameSteps
+
 on welcomeText()
-	return "Welcome! This sets up everything your Microsoft Store copy of Minecraft Dungeons needs on this Mac:" & return & return & "- Wine 11 (built from CrossOver 26.3's code) with the Xbox game runtime" & return & "- DXMT, which turns the game's Direct3D 11 into Apple Metal" & return & "- the Microsoft sign-in and download client" & return & "- Microsoft's Visual C++ runtimes" & return & return & "It downloads about 800 MB and takes 5 to 15 minutes. Everything lives in one folder that Uninstall removes completely."
+	return "Welcome! This sets up everything your Microsoft Store Xbox games (Minecraft Dungeons, Minecraft Bedrock) need on this Mac:" & return & return & "- Wine 11 (built from CrossOver 26.3's code) with the Xbox game runtime" & return & "- DXMT, which turns the game's Direct3D 11 into Apple Metal" & return & "- the Microsoft sign-in and download client" & return & "- Microsoft's Visual C++ runtimes" & return & return & "It downloads about 800 MB and takes 5 to 15 minutes. Everything lives in one folder that Uninstall removes completely."
 end welcomeText
 
 on signInText()
@@ -431,17 +570,14 @@ end settingsMenu
 -- More
 -- ---------------------------------------------------------------------------
 on moreMenu()
-	set opts to {"Sign in again...", "Re-download / update the game...", "Add a Launcher-version game folder instead...", "How to copy the game from your PC", "Open the saves folder", "Back up saves to Documents", "Force-quit the game", "Update and repair...", "Minecraft Launcher (experimental)...", "Show log", "Create a diagnostic report", "About Dungeons for Mac", "Uninstall...", "Quit"}
+	set opts to {"Sign in again...", "Add a Launcher-version Dungeons folder...", "How to copy the game from your PC", "Open the saves folder", "Back up saves to Documents", "Force-quit the game", "Update and repair...", "Minecraft Launcher (experimental)...", "Show log", "Create a diagnostic report", "About Dungeons for Mac", "Uninstall...", "Quit"}
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt "More options:" OK button name "Select" cancel button name "Back"
 	if pick is false then return "back"
 	set pick to item 1 of pick
 	if pick starts with "Sign in again" then
 		set res to my runJob("signin", "Signing in to Microsoft")
 		my reportResult(res, "Signed in.")
-	else if pick starts with "Re-download" then
-		set res to my runJob("storeinstall", "Downloading Minecraft Dungeons")
-		my reportResult(res, "Downloaded.")
-	else if pick starts with "Add a Launcher" then
+	else if pick starts with "Add a Launcher-version" then
 		my addGame()
 	else if pick starts with "How to copy" then
 		my dlg(my howToText(), {"OK"}, "OK")
