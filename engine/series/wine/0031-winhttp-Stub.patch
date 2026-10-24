@@ -1,0 +1,30 @@
+From 598017d2d05e8ca47db7e58a756350bde9448fa1 Mon Sep 17 00:00:00 2001
+From: Hans Leidekker <hans@codeweavers.com>
+Date: Thu, 9 Apr 2026 10:59:11 +0200
+Subject: [PATCH 31/79] winhttp: Stub
+
+Applied unchanged (or with context fuzz) from Ferestre's 0014-winhttp-ipv6-fast-fallback.patch.
+---
+ dlls/winhttp/session.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/dlls/winhttp/session.c b/dlls/winhttp/session.c
+index 45e2087..ca99d60 100644
+--- a/dlls/winhttp/session.c
++++ b/dlls/winhttp/session.c
+@@ -279,6 +279,15 @@ static BOOL session_set_option( struct object_header *hdr, DWORD option, void *b
+         return TRUE;
+     }
+ 
++    case WINHTTP_OPTION_IPV6_FAST_FALLBACK:
++        if (buflen != sizeof(BOOL))
++        {
++            SetLastError( ERROR_INSUFFICIENT_BUFFER );
++            return FALSE;
++        }
++        FIXME( "WINHTTP_OPTION_IPV6_FAST_FALLBACK: %d\n", *(BOOL *)buffer );
++        return TRUE;
++
+     default:
+         FIXME( "unimplemented option %lu\n", option );
+         SetLastError( ERROR_WINHTTP_INVALID_OPTION );

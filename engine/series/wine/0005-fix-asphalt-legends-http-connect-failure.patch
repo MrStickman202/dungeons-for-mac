@@ -1,0 +1,29 @@
+From 22bb5069dd7dc1df91886c8fe7209ba99d93dc0c Mon Sep 17 00:00:00 2001
+From: Christopher Homberger <christopher.homberger@web.de>
+Date: Tue, 4 Aug 2026 17:34:25 +0200
+Subject: [PATCH 05/79] fix: asphalt legends http connect failure
+
+Ported to the CrossOver 26.3 tree from 0004-fix-asphalt-legends-http-connect-failure.patch.
+---
+ dlls/winhttp/session.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/dlls/winhttp/session.c b/dlls/winhttp/session.c
+index 737272a..45e2087 100644
+--- a/dlls/winhttp/session.c
++++ b/dlls/winhttp/session.c
+@@ -1222,6 +1222,14 @@ static BOOL request_set_option( struct object_header *hdr, DWORD option, void *b
+         return TRUE;
+     }
+ 
++    // Asphalt Legends set this option and fails if this returns an error.
++    // While actually not requireing this feature.
++    case WINHTTP_OPTION_DECOMPRESSION:
++    {
++        FIXME("WINHTTP_OPTION_DECOMPRESSION: stub!\n");
++        return TRUE;
++    }
++
+     default:
+         FIXME( "unimplemented option %lu\n", option );
+         SetLastError( ERROR_WINHTTP_INVALID_OPTION );

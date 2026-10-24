@@ -1,0 +1,158 @@
+# Builds the Mac engine (CrossOver 26.3 Wine + Highball/Xodus/Ferestre patches +
+# xgameruntime) and the Xodus client, and publishes both as a release the app downloads.
+name: build
+on:
+  push:
+    paths:
+      - engine/series/**
+      - engine/inputs.json
+      - .github/workflows/build.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  engine:
+    # Intel runner on purpose: this tree's Unix side is x86_64 only (it runs under Rosetta),
+    # as in CrossOver's, Sikarugir's and Highball's builds.
+    runs-on: macos-15-intel
+    timeout-minutes: 340
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
+    steps:
+      - uses: actions/checkout@v4
+      - name: source
+        run: |
+          set -euo pipefail
+          base=https://github.com/${{ github.repository }}/releases/download/src-crossover-26.3.0
+          curl -sSfL -o wine.tar.xz "$base/wine-crossover-26.3.0.tar.xz"
+          curl -sSfL -o wine.sha "$base/wine-crossover-26.3.0.tar.xz.sha256"
+          echo "$(awk '{print $1}' wine.sha)  wine.tar.xz" | shasum -a 256 -c -
+          mkdir -p src && tar -xJf wine.tar.xz -C src
+      - name: patch series
+        run: |
+          set -euo pipefail
+          cd src/wine
+          for p in ../../engine/series/wine/*.patch; do
+            git apply --whitespace=nowarn -p1 "$p" || { echo "::error::$(basename "$p") does not apply"; exit 1; }
+          done
+          echo "applied $(ls ../../engine/series/wine/*.patch | wc -l) patches"
+      - name: toolchain
+        run: |
+          set -euo pipefail
+          brew install -q mingw-w64 bison flex autoconf automake pkg-config ccache gnutls freetype sdl2 libpng jpeg-turbo gstreamer molten-vk || true
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
+      - name: regenerate configure
+        run: |
+          set -euo pipefail
+          cd src/wine
+          autoreconf -f
+          grep -q 'dlls/xgameruntime' configure
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ccache-engine-${{ hashFiles('engine/series/wine/**') }}
+          restore-keys: ccache-engine-
+      - name: configure and build
+        run: |
+          set -euo pipefail
+          mkdir -p build && cd build
+          ../src/wine/configure \
+            --prefix="$PWD/../out/engine" \
+            --enable-archs=i386,x86_64 \
+            --with-mingw \
+            --without-alsa --without-capi --with-coreaudio --without-cups --without-dbus \
+            --without-fontconfig --with-freetype --with-gnutls --without-gphoto --with-gstreamer \
+            --without-krb5 --without-netapi --without-oss --without-pulse \
+            --without-sane --with-sdl --without-udev --without-usb --without-v4l2 --without-x \
+            --disable-tests \
+            CC="ccache clang" CXX="ccache clang++" \
+            CROSSCC="ccache x86_64-w64-mingw32-gcc" \
+            i386_CC="ccache i686-w64-mingw32-gcc" x86_64_CC="ccache x86_64-w64-mingw32-gcc"
+          make -j"$(sysctl -n hw.ncpu)"
+          make install-lib
+      - name: package
+        run: |
+          set -euo pipefail
+          test -x out/engine/bin/wine
+          test -f out/engine/lib/wine/x86_64-windows/xgameruntime.dll
+          mono=$(sed -n 's/^#define MONO_VERSION "\(.*\)"/\1/p' src/wine/dlls/appwiz.cpl/addons.c)
+          gecko=$(sed -n 's/^#define GECKO_VERSION "\(.*\)"/\1/p' src/wine/dlls/appwiz.cpl/addons.c)
+          mkdir -p out/engine/share/wine/mono out/engine/share/wine/gecko
+          curl -sSfL "https://dl.winehq.org/wine/wine-mono/${mono}/wine-mono-${mono}-x86.tar.xz" | tar -xJ -C out/engine/share/wine/mono
+          for arch in x86 x86_64; do
+            curl -sSfL "https://dl.winehq.org/wine/wine-gecko/${gecko}/wine-gecko-${gecko}-${arch}.tar.xz" | tar -xJ -C out/engine/share/wine/gecko
+          done
+          # DXMT's bridge as a Wine built-in, as Highball's engine ships it
+          curl -sSfL -o dxmt.tar.gz "https://github.com/3Shain/dxmt/releases/download/v0.80/dxmt-v0.80-builtin.tar.gz"
+          mkdir -p dxmt && tar -xzf dxmt.tar.gz -C dxmt
+          for arch in x86_64 i386; do
+            f=$(find dxmt -path "*${arch}-windows/winemetal.dll" | head -1)
+            [ -n "$f" ] && cp "$f" "out/engine/lib/wine/${arch}-windows/winemetal.dll"
+          done
+          find out/engine/lib/wine/x86_64-windows out/engine/lib/wine/i386-windows -type f \( -name '*.dll' -o -name '*.exe' -o -name '*.sys' -o -name '*.drv' \) -print0 \
+            | xargs -0 -n 50 x86_64-w64-mingw32-strip --strip-debug 2>/dev/null || true
+          find out/engine/lib/wine/x86_64-unix -name '*.so' -type f -print0 | xargs -0 -n 50 strip -x -S 2>/dev/null || true
+          strip -x -S out/engine/bin/wine out/engine/bin/wineserver 2>/dev/null || true
+          out/engine/bin/wine --version
+          tar -C out -czf dfm-engine.tar.gz engine
+          shasum -a 256 dfm-engine.tar.gz | tee dfm-engine.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine
+          path: dfm-engine.tar.gz*
+          retention-days: 14
+
+  client:
+    # Native Apple silicon build of the Xodus sign-in/download client and its service.
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: source
+        run: |
+          set -euo pipefail
+          commit=$(python3 -c 'import json;print(json.load(open("engine/inputs.json"))["xodus"]["commit"])')
+          git init -q xodus && cd xodus
+          git remote add origin https://github.com/xodus-gaming/xodus.git
+          git fetch -q --depth=1 origin "$commit" && git checkout -q FETCH_HEAD
+          for p in ../engine/series/xodus/*.patch; do
+            git apply --whitespace=nowarn "$p" || { echo "::error::$(basename "$p") does not apply"; exit 1; }
+          done
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            xodus/target
+          key: cargo-${{ hashFiles('engine/series/xodus/**', 'engine/inputs.json') }}
+          restore-keys: cargo-
+      - name: build
+        run: |
+          set -euo pipefail
+          cd xodus
+          cargo build --release --locked -p xodus-cli -p xodus-service
+          mkdir -p ../client && cp target/release/xodus-cli target/release/xodus-service ../client/
+          cd .. && tar -czf dfm-client.tar.gz client && shasum -a 256 dfm-client.tar.gz | tee dfm-client.tar.gz.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client
+          path: dfm-client.tar.gz*
+          retention-days: 14
+
+  release:
+    needs: [engine, client]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="build-$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}"
+          gh release create "$tag" -R "${{ github.repository }}" --prerelease --title "$tag" \
+            --notes "Engine and client built by run ${{ github.run_id }} from ${GITHUB_SHA}. Source: this repository plus engine/inputs.json." \
+            dfm-engine.tar.gz dfm-engine.tar.gz.sha256 dfm-client.tar.gz dfm-client.tar.gz.sha256

@@ -1,0 +1,41 @@
+From 0593667ead2da93f796a38bb8cfc9b7a7663bc84 Mon Sep 17 00:00:00 2001
+From: Ferestre contributors <ferestre@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 19:18:12 +0300
+Subject: [PATCH 47/79] 0007-report-the-package-s-own-xbox-title-id
+
+Applied to dlls/xgameruntime from Ferestre's patches/xgameruntime/0007-report-the-package-s-own-xbox-title-id.patch.
+---
+ dlls/xgameruntime/xgame.c | 17 ++++++++++++++---
+ 1 file changed, 14 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/xgameruntime/xgame.c b/dlls/xgameruntime/xgame.c
+index 9de8e26..4a36496 100644
+--- a/dlls/xgameruntime/xgame.c
++++ b/dlls/xgameruntime/xgame.c
+@@ -72,12 +72,23 @@ static ULONG WINAPI x_game_Release( IXGameImpl3 *iface )
+ 
+ static HRESULT WINAPI x_game_XGameGetXboxTitleId( IXGameImpl3 *iface, UINT32 *titleId )
+ {
++    char title_id[32], client_id[64];
++
+     TRACE( "iface %p, titleId %p.\n", iface, titleId );
+ 
+-    /* Without a registered package there is no title identity to report. Hand
+-     * back zero rather than failing: callers treat an error here as fatal. */
+     if (!titleId) return E_INVALIDARG;
+-    *titleId = 0;
++
++    /* The package knows who it is: MicrosoftGame.config carries TitleId, and
++     * xgr_title_identity() already reads it for the token endpoints. Report it
++     * here too. Answering zero is not harmless -- a title that asks for its own
++     * id is about to key something on it, and Forza Horizon 5 stops during
++     * startup when it is told it has no identity.
++     *
++     * Zero remains the answer when there is no config to read, because callers
++     * treat a failure here as fatal and an error would be worse than a blank. */
++    xgr_title_identity( title_id, sizeof(title_id), client_id, sizeof(client_id) );
++    *titleId = title_id[0] ? strtoul( title_id, NULL, 10 ) : 0;
++    TRACE( "reporting title id %u.\n", *titleId );
+     return S_OK;
+ }
+ 

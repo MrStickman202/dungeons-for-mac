@@ -1,0 +1,86 @@
+From 7abe852c2631f7ed0371b540a12df7c1f6b44747 Mon Sep 17 00:00:00 2001
+From: Dungeons for Mac port <port@dungeons-for-mac>
+Date: Sat, 24 Oct 2026 19:20:15 +0300
+Subject: [PATCH 78/79] xgameruntime: Reach xodus-service on macOS.
+
+macOS has no MSG_NOSIGNAL, no SOCK_NONBLOCK/SOCK_CLOEXEC socket type flags and no XDG_RUNTIME_DIR. Set the flags with fcntl, turn SIGPIPE off with SO_NOSIGPIPE, and fall back to TMPDIR (then /tmp) for the service directory, matching the macOS service.
+---
+ dlls/xgameruntime/unixlib.c | 44 ++++++++++++++++++++++++++++++++++---
+ 1 file changed, 41 insertions(+), 3 deletions(-)
+
+diff --git a/dlls/xgameruntime/unixlib.c b/dlls/xgameruntime/unixlib.c
+index d94289f..e579a1b 100644
+--- a/dlls/xgameruntime/unixlib.c
++++ b/dlls/xgameruntime/unixlib.c
+@@ -36,6 +36,13 @@
+ #include <sys/socket.h>
+ #include <sys/un.h>
+ 
++/* macOS has neither MSG_NOSIGNAL nor the SOCK_NONBLOCK/SOCK_CLOEXEC type
++ * flags: SIGPIPE is turned off per socket with SO_NOSIGPIPE, and the two flags
++ * are set with fcntl right after socket(). */
++#ifndef MSG_NOSIGNAL
++#define MSG_NOSIGNAL 0
++#endif
++
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+ #include "windef.h"
+@@ -126,7 +133,38 @@ static char *base64_encode( const void *data, size_t len )
+ static const char *xodus_runtime_dir(void)
+ {
+     const char *override = getenv("XODUS_RUNTIME_DIR");
+-    return override && *override ? override : getenv("XDG_RUNTIME_DIR");
++    if (override && *override) return override;
++#ifdef __APPLE__
++    /* No XDG_RUNTIME_DIR on macOS: the service's own fallback is the user's
++     * private temporary directory, so meet it there. */
++    if ((override = getenv("TMPDIR")) && *override) return override;
++    return "/tmp";
++#else
++    return getenv("XDG_RUNTIME_DIR");
++#endif
++}
++
++static int open_service_socket(void)
++{
++#ifdef SOCK_NONBLOCK
++    return socket( AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0 );
++#else
++    int fd = socket( AF_UNIX, SOCK_STREAM, 0 );
++    if (fd < 0) return -1;
++    if (fcntl( fd, F_SETFD, FD_CLOEXEC ) < 0 ||
++        fcntl( fd, F_SETFL, fcntl( fd, F_GETFL ) | O_NONBLOCK ) < 0)
++    {
++        close( fd );
++        return -1;
++    }
++#ifdef SO_NOSIGPIPE
++    {
++        int one = 1;
++        setsockopt( fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one) );
++    }
++#endif
++    return fd;
++#endif
+ }
+ 
+ /* Every exchange with the service is bounded by one deadline, reads, writes and
+@@ -180,7 +218,7 @@ static int connect_service( long long deadline )
+ 
+     if (!runtime_dir || !runtime_dir[0])
+     {
+-        WARN( "XDG_RUNTIME_DIR is not set; cannot reach xodus-service.\n" );
++        WARN( "neither XODUS_RUNTIME_DIR nor XDG_RUNTIME_DIR is set; cannot reach xodus-service.\n" );
+         errno = ENOENT;
+         return -1;
+     }
+@@ -191,7 +229,7 @@ static int connect_service( long long deadline )
+         return -1;
+     }
+ 
+-    if ((fd = socket( AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0 )) < 0) return -1;
++    if ((fd = open_service_socket()) < 0) return -1;
+     for (;;)
+     {
+         if (!connect( fd, (struct sockaddr *)&addr, sizeof(addr) )) return fd;

@@ -1,0 +1,46 @@
+From ac2fad34e151f874a07b6d1cd046e8c8b87e205d Mon Sep 17 00:00:00 2001
+From: Ferestre contributors <ferestre@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 19:18:13 +0300
+Subject: [PATCH 53/79] 0013-report-the-tls-versions-the-http-stack-may-use
+
+Applied to dlls/xgameruntime from Ferestre's patches/xgameruntime/0013-report-the-tls-versions-the-http-stack-may-use.patch.
+---
+ dlls/xgameruntime/xnetworking.c | 18 ++++++++++++++++--
+ 1 file changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/xgameruntime/xnetworking.c b/dlls/xgameruntime/xnetworking.c
+index bec3a77..75a07bc 100644
+--- a/dlls/xgameruntime/xnetworking.c
++++ b/dlls/xgameruntime/xnetworking.c
+@@ -21,6 +21,9 @@
+ 
+ #include "private.h"
+ 
++/* for the WINHTTP_FLAG_SECURE_PROTOCOL_* mask the GDK reports below */
++#include <winhttp.h>
++
+ WINE_DEFAULT_DEBUG_CHANNEL(gdkc);
+ 
+ struct x_networking
+@@ -129,8 +132,19 @@ static BOOLEAN WINAPI x_networking_XNetworkingUnregisterPreferredLocalUdpMultipl
+  *
+  * There is nothing to pin: XNetworkingVerifyServerCertificate below accepts the
+  * connection, so report no thumbprints and let the caller do the ordinary TLS
+- * validation it would otherwise do. */
+-static const XNetworkingSecurityInformation default_security_information;
++ * validation it would otherwise do.
++ *
++ * The protocol flags are not a formality either. The GDK documents them as a
++ * WINHTTP_FLAG_SECURE_PROTOCOL_* mask to be handed straight to
++ * WinHttpSetOption( WINHTTP_OPTION_SECURE_PROTOCOLS ), and a title that does
++ * exactly that with the zero this used to report tells WinHttp that no TLS
++ * version is permitted. Say the modern two instead, which is what a machine
++ * with a current policy allows and what every service the titles here talk to
++ * negotiates. */
++static const XNetworkingSecurityInformation default_security_information =
++{
++    WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3,
++};
+ 
+ static HRESULT security_information_result( XAsyncBlock *async, SIZE_T buffer_size, SIZE_T *buffer_used,
+                                             UINT8 *buffer, XNetworkingSecurityInformation **ptr_to_buffer )

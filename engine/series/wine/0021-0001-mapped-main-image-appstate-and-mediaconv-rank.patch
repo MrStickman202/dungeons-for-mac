@@ -1,0 +1,164 @@
+From 6887d558ed833994d0e5c254b4e27fb90c751eb9 Mon Sep 17 00:00:00 2001
+From: Ferestre contributors <ferestre@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 19:15:08 +0300
+Subject: [PATCH 21/79] 0001-mapped-main-image-appstate-and-mediaconv-rank
+
+Ported to the CrossOver 26.3 tree from Ferestre's 0001. Kept: the mapped main image's
+process state and twinapi.appcore app state. Left out: the Proton media-converter rank (not in this tree)
+and the debugging aids (TLS-callback tracing, WINE_IMAGE_PATCH in-memory byte patching, illegal-
+instruction byte dumps), none of which a game needs to run.
+---
+ dlls/ntdll/unix/loader.c       | 59 ++++++++++++++++++++++++++++++++++
+ dlls/ntdll/unix/process.c      | 18 ++++++++---
+ dlls/ntdll/unix/unix_private.h |  1 +
+ dlls/twinapi.appcore/main.c    | 17 ++++++++--
+ 4 files changed, 88 insertions(+), 7 deletions(-)
+
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 1c9db2b..0ef0f84 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -1609,6 +1609,65 @@ static NTSTATUS open_mapped_dll_file( const UNICODE_STRING *nt_name, HANDLE *map
+ }
+ 
+ 
++/***********************************************************************
++ *           open_mapped_image_file
++ *
++ * Like open_mapped_dll_file(), but hands back a plain file handle for the
++ * mapped fd rather than an image section.
++ *
++ * Needed by get_pe_file_info() in process.c: process creation validates the
++ * executable by reading it from disk, which fails for an image that only
++ * exists behind WINE_DLL_FILE_MAP. Without this, only DLLs can be loaded
++ * from the map -- a main executable is rejected before the child process's
++ * open_main_image() ever runs.
++ */
++NTSTATUS open_mapped_image_file( const UNICODE_STRING *nt_name, HANDLE *handle )
++{
++    const char *value = getenv( "WINE_DLL_FILE_MAP" );
++    const char *entry, *sep, *end;
++    char *utf8_name;
++    unsigned int allocLen;
++    NTSTATUS status;
++
++
++    if (!value || !*value) return STATUS_DLL_NOT_FOUND;
++    if (!nt_name || !nt_name->Buffer || !nt_name->Length) return STATUS_DLL_NOT_FOUND;
++
++    if ((status = utf8_wcstombs_size( nt_name->Buffer, nt_name->Length / sizeof(WCHAR), &allocLen )))
++        return status;
++    utf8_name = alloca( allocLen );
++    if ((status = utf8_wcstombs( utf8_name, allocLen, &allocLen, nt_name->Buffer,
++                                 nt_name->Length / sizeof(WCHAR) )))
++        return status;
++
++    for (entry = value; *entry; entry = *end ? end + 1 : end)
++    {
++        size_t len;
++        int fd = 0;
++        const char *p;
++
++        end = strchr( entry, '|' );
++        if (!end) end = entry + strlen( entry );
++        if (end == entry) continue;
++
++        sep = strchr( entry, ':' );
++        if (!sep || sep >= end) continue;
++
++        for (p = entry; p < sep; p++)
++        {
++            if (*p < '0' || *p > '9') { fd = -1; break; }
++            fd = fd * 10 + (*p - '0');
++        }
++        if (fd < 0 || sep == entry || sep + 1 == end) continue;
++        len = end - sep - 1;
++        if (len != allocLen || strncmp( sep + 1, utf8_name, len )) continue;
++
++        return wine_server_fd_to_handle( fd, GENERIC_READ | SYNCHRONIZE, 0, handle );
++    }
++    return STATUS_DLL_NOT_FOUND;
++}
++
++
+ /***********************************************************************
+  *	open_dll_file
+  *
+diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
+index 86f8934..41b818d 100644
+--- a/dlls/ntdll/unix/process.c
++++ b/dlls/ntdll/unix/process.c
+@@ -736,12 +736,22 @@ static unsigned int get_pe_file_info( OBJECT_ATTRIBUTES *attr, UNICODE_STRING *n
+     HANDLE mapping;
+ 
+     *handle = 0;
++    *unix_name = NULL;
++    nt_name->Buffer = NULL;
+     memset( info, 0, sizeof(*info) );
+-    if (!(status = get_nt_and_unix_names( attr, nt_name, unix_name, FILE_OPEN, FALSE )))
++
++    /* An image supplied through WINE_DLL_FILE_MAP lives only behind a file
++     * descriptor. Try it before get_nt_and_unix_names(): with FILE_OPEN that
++     * call fails outright when the leaf has no on-disk file, and even when a
++     * (still encrypted) placeholder does exist, reading it here would fail the
++     * PE validation below. This mirrors the ordering in open_main_image(). */
++    status = open_mapped_image_file( attr->ObjectName, handle );
++    if (status)
+     {
+-        status = open_unix_file( handle, *unix_name, GENERIC_READ, attr, 0,
+-                                 FILE_SHARE_READ | FILE_SHARE_DELETE,
+-                                 FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0 );
++        if (!(status = get_nt_and_unix_names( attr, nt_name, unix_name, FILE_OPEN, FALSE )))
++            status = open_unix_file( handle, *unix_name, GENERIC_READ, attr, 0,
++                                     FILE_SHARE_READ | FILE_SHARE_DELETE,
++                                     FILE_OPEN, FILE_SYNCHRONOUS_IO_NONALERT, NULL, 0 );
+     }
+     if (status)
+     {
+diff --git a/dlls/ntdll/unix/unix_private.h b/dlls/ntdll/unix/unix_private.h
+index 0c68ca4..9f84998 100644
+--- a/dlls/ntdll/unix/unix_private.h
++++ b/dlls/ntdll/unix/unix_private.h
+@@ -337,6 +337,7 @@ extern NTSTATUS get_thread_wow64_context( HANDLE handle, void *ctx, ULONG size )
+ extern NTSTATUS set_thread_wow64_context( HANDLE handle, const void *ctx, ULONG size );
+ extern void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid );
+ extern NTSTATUS open_hkcu_key( const char *path, HANDLE *key );
++extern NTSTATUS open_mapped_image_file( const UNICODE_STRING *nt_name, HANDLE *handle );
+ 
+ extern NTSTATUS sync_ioctl( HANDLE file, ULONG code, void *in_buffer, ULONG in_size,
+                             void *out_buffer, ULONG out_size );
+diff --git a/dlls/twinapi.appcore/main.c b/dlls/twinapi.appcore/main.c
+index d536506..f91a28d 100644
+--- a/dlls/twinapi.appcore/main.c
++++ b/dlls/twinapi.appcore/main.c
+@@ -35,8 +35,18 @@ ULONG WINAPI RegisterAppConstrainedChangeNotification( PAPPCONSTRAIN_CHANGE_ROUT
+  */
+ ULONG WINAPI RegisterAppStateChangeNotification( PAPPSTATE_CHANGE_ROUTINE routine, void *context, PAPPSTATE_REGISTRATION *reg )
+ {
+-    FIXME( "routine %p, context %p, reg %p - stub.\n", routine, context, reg );
+-    return ERROR_CALL_NOT_IMPLEMENTED;
++    /* Placeholder registration: processes here are never suspended by an app
++     * lifetime manager, so the routine would never be invoked. Callers do treat
++     * a failure as fatal though -- XCurl aborts curl_global_init, which surfaces
++     * as "Could not initialize libcurl" during engine startup -- so report
++     * success and hand back a token that Unregister can accept. */
++    static int placeholder_registration;
++
++    FIXME( "routine %p, context %p, reg %p - semi-stub.\n", routine, context, reg );
++
++    if (!reg) return ERROR_INVALID_PARAMETER;
++    *reg = (PAPPSTATE_REGISTRATION)&placeholder_registration;
++    return ERROR_SUCCESS;
+ }
+ 
+ /***********************************************************************
+@@ -52,7 +62,8 @@ void WINAPI UnregisterAppConstrainedChangeNotification( PAPPCONSTRAIN_REGISTRATI
+  */
+ void WINAPI UnregisterAppStateChangeNotification( PAPPSTATE_REGISTRATION reg )
+ {
+-    FIXME( "reg %p - stub.\n", reg );
++    /* Nothing was registered beyond the placeholder token. */
++    TRACE( "reg %p.\n", reg );
+ }
+ 
+ HRESULT WINAPI DllGetClassObject( REFCLSID clsid, REFIID riid, void **out )

@@ -1,0 +1,40 @@
+From 0f3b72e7537d6926f98bfff80149fb1275e1d4d7 Mon Sep 17 00:00:00 2001
+From: Ferestre contributors <ferestre@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 19:18:12 +0300
+Subject: [PATCH 44/79] 0004-sign-the-callers-http-method-not-always-GET
+
+Applied to dlls/xgameruntime from Ferestre's patches/xgameruntime/0004-sign-the-callers-http-method-not-always-GET.patch.
+---
+ dlls/xgameruntime/xuser.c | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/xgameruntime/xuser.c b/dlls/xgameruntime/xuser.c
+index 12e05d4..c75e39c 100644
+--- a/dlls/xgameruntime/xuser.c
++++ b/dlls/xgameruntime/xuser.c
+@@ -473,7 +473,7 @@ static HRESULT WINAPI x_user_XUserGetTokenAndSignatureResult( IXUserImpl6 *iface
+ 
+ static HRESULT WINAPI x_user_XUserGetTokenAndSignatureUtf16Async( IXUserImpl6 *iface, XUserHandle user, XUserGetTokenAndSignatureOptions options, const WCHAR *method, const WCHAR *url, SIZE_T headerCount, const XUserGetTokenAndSignatureUtf16HttpHeader *headers, SIZE_T bodySize, const void *bodyBuffer, XAsyncBlock *async )
+ {
+-    char *url_a = NULL;
++    char *url_a = NULL, *method_a = NULL;
+     HRESULT hr;
+     int len;
+ 
+@@ -484,7 +484,15 @@ static HRESULT WINAPI x_user_XUserGetTokenAndSignatureUtf16Async( IXUserImpl6 *i
+         (url_a = malloc( len )))
+         WideCharToMultiByte( CP_UTF8, 0, url, -1, url_a, len, NULL, NULL );
+ 
+-    hr = token_and_signature_async( async, "GET", url_a, bodySize, bodyBuffer );
++    if (method && (len = WideCharToMultiByte( CP_UTF8, 0, method, -1, NULL, 0, NULL, NULL )) > 0 &&
++        (method_a = malloc( len )))
++        WideCharToMultiByte( CP_UTF8, 0, method, -1, method_a, len, NULL, NULL );
++
++    /* The caller's method, not "GET": a signature computed over the wrong verb
++     * is a signature the service rejects, and a POST signed as a GET fails in a
++     * way that looks like the token being wrong. */
++    hr = token_and_signature_async( async, method_a ? method_a : "GET", url_a, bodySize, bodyBuffer );
++    free( method_a );
+     free( url_a );
+     return hr;
+ }

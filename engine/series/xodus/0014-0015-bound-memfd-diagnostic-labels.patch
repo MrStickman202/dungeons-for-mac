@@ -1,0 +1,26 @@
+From 3439b766d8474da42c3e6a04ca878d654831046f Mon Sep 17 00:00:00 2001
+From: Ferestre contributors <ferestre@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 19:20:34 +0300
+Subject: [PATCH 14/28] 0015-bound-memfd-diagnostic-labels
+
+From Ferestre's patches/xodus-cli.
+---
+ crates/xodus-cli/src/commands/run.rs | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/crates/xodus-cli/src/commands/run.rs b/crates/xodus-cli/src/commands/run.rs
+index 26bde19..c5c3404 100644
+--- a/crates/xodus-cli/src/commands/run.rs
++++ b/crates/xodus-cli/src/commands/run.rs
+@@ -42,7 +42,10 @@ fn make_temp_file(_folder: &str, name: &str) -> std::io::Result<std::fs::File> {
+         .next()
+         .filter(|s| !s.is_empty())
+         .unwrap_or("xodus");
+-    let fd = memfd_create(leaf, MemfdFlags::CLOEXEC).map_err(std::io::Error::from)?;
++    // A valid package filename can exceed Linux's 249-byte memfd label limit.
++    // The label is diagnostic only, so use the generic label in that case.
++    let label = if leaf.len() <= 249 { leaf } else { "xodus" };
++    let fd = memfd_create(label, MemfdFlags::CLOEXEC).map_err(std::io::Error::from)?;
+     Ok(std::fs::File::from(fd))
+ }
+ 

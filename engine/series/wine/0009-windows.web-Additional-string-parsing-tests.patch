@@ -1,0 +1,57 @@
+From 48448fee5da61109e0e86cbdf0ec92909efd5611 Mon Sep 17 00:00:00 2001
+From: Olivia Ryan <olivia.r.dev@gmail.com>
+Date: Tue, 24 Mar 2026 19:05:51 +0000
+Subject: [PATCH 09/79] windows.web: Additional string parsing tests.
+
+Ported to the CrossOver 26.3 tree from 0009-windows.web-Additional-string-parsing-tests.patch.
+---
+ dlls/windows.web/tests/web.c | 29 +++++++++++++++++++++++++++++
+ 1 file changed, 29 insertions(+)
+
+diff --git a/dlls/windows.web/tests/web.c b/dlls/windows.web/tests/web.c
+index 9af1b87..b0a4fc6 100644
+--- a/dlls/windows.web/tests/web.c
++++ b/dlls/windows.web/tests/web.c
+@@ -321,6 +321,31 @@ static void test_JsonValueStatics(void)
+         IJsonValue_Release( json_value );
+     }
+ 
++    json = L"\"\\\"\\\\\\/\\b\\f\\n\\r\\t\\u0000\\u0057\\u0069\\u006e\\u0065\\udAbC\\uDcEf\"";
++    hr = WindowsCreateString( json, wcslen( json ), &str );
++    ok( hr == S_OK, "got hr %#lx.\n", hr );
++    hr = IJsonValueStatics_Parse( json_value_statics, str, &json_value );
++    ok( hr == S_OK, "got hr %#lx.\n", hr );
++    WindowsDeleteString( str );
++    if (SUCCEEDED(hr))
++    {
++        HSTRING parsed_str = NULL;
++        int res;
++
++        json = L"\"\\/\b\f\n\r\t\0Wine\U000BF0EF";
++        hr = WindowsCreateString( json, 15, &str );
++        ok( hr == S_OK, "got hr %#lx.\n", hr );
++        hr = IJsonValue_GetString( json_value, &parsed_str );
++        ok( hr == S_OK, "got hr %#lx.\n", hr );
++        hr = WindowsCompareStringOrdinal( str, parsed_str, &res );
++        ok( hr == S_OK, "got hr %#lx.\n", hr );
++        ok( res == 0, "got different HSTRINGS str = %s, parsed_str = %s.\n", wine_dbgstr_hstring( str ), wine_dbgstr_hstring( parsed_str ) );
++
++        WindowsDeleteString( parsed_str );
++        WindowsDeleteString( str );
++        IJsonValue_Release( json_value );
++    }
++
+     json = L"null";
+     check_json( json_value_statics, json, JsonValueType_Null, TRUE );
+     json = L"false";
+@@ -384,6 +409,10 @@ static void test_JsonValueStatics(void)
+     check_json( json_value_statics, json, JsonValueType_String, FALSE );
+     json = L"\v \"The Wine     Project\"";
+     check_json( json_value_statics, json, JsonValueType_String, FALSE );
++    json = L"\"\\\"";
++    check_json( json_value_statics, json, JsonValueType_String, FALSE );
++    json = L"\"\\u123\"";
++    check_json( json_value_statics, json, JsonValueType_String, FALSE );
+     json = L"[\"Wine\" \"Linux\"]";
+     check_json( json_value_statics, json, JsonValueType_Array, FALSE );
+     json = L"{"

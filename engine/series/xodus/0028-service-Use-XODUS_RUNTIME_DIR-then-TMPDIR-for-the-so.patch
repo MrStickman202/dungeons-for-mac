@@ -1,0 +1,29 @@
+From 29d02ce3601e9f7849f76657705991d90640cff3 Mon Sep 17 00:00:00 2001
+From: Dungeons for Mac port <port@dungeons-for-mac>
+Date: Sat, 24 Oct 2026 19:20:58 +0300
+Subject: [PATCH 28/28] service: Use XODUS_RUNTIME_DIR, then TMPDIR, for the
+ socket on macOS
+
+Matches xgameruntime's macOS fallback, so the game finds the service without XDG_RUNTIME_DIR.
+---
+ crates/xodus-service/src/utils.rs | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/crates/xodus-service/src/utils.rs b/crates/xodus-service/src/utils.rs
+index 7b06f87..6230559 100644
+--- a/crates/xodus-service/src/utils.rs
++++ b/crates/xodus-service/src/utils.rs
+@@ -8,5 +8,12 @@ pub fn get_runtime_dir() -> String {
+ 
+ #[cfg(target_os = "macos")]
+ pub fn get_runtime_dir() -> String {
+-    return "/tmp/".to_string();
++    // No XDG_RUNTIME_DIR on macOS. Honour the same override the Linux build
++    // and the Wine side (xgameruntime's unixlib) read, then the user's private
++    // temporary directory, which is where xgameruntime looks next.
++    std::env::var("XODUS_RUNTIME_DIR")
++        .ok()
++        .filter(|value| !value.is_empty())
++        .or_else(|| std::env::var("TMPDIR").ok().filter(|value| !value.is_empty()))
++        .unwrap_or_else(|| "/tmp".to_string())
+ }

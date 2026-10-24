@@ -1,0 +1,44 @@
+From e3ec3bc3a57adf18d67fc5d4c286ed8582ba06fa Mon Sep 17 00:00:00 2001
+From: Ferestre contributors <ferestre@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 19:18:15 +0300
+Subject: [PATCH 62/79] 0022-report-the-user-handle-async-result-size
+
+Applied to dlls/xgameruntime from Ferestre's patches/xgameruntime/0022-report-the-user-handle-async-result-size.patch.
+---
+ dlls/xgameruntime/xuser.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/dlls/xgameruntime/xuser.c b/dlls/xgameruntime/xuser.c
+index 9426f32..934de38 100644
+--- a/dlls/xgameruntime/xuser.c
++++ b/dlls/xgameruntime/xuser.c
+@@ -104,6 +104,10 @@ static struct x_local_user local_user =
+     .local_id = { .value = 1 },
+ };
+ 
++/* Keep the result bytes separate from the object the handle points to.
++ * XAsyncGetResult copies those bytes, while XUserAddResult returns the handle. */
++static XUserHandle local_user_result = (XUserHandle)&local_user;
++
+ static XUserHandle local_user_handle( void )
+ {
+     return (XUserHandle)&local_user;
+@@ -227,7 +231,8 @@ static HRESULT WINAPI x_user_XUserAddAsync( IXUserImpl6 *iface, XUserAddOptions
+     if (!async) return E_INVALIDARG;
+ 
+     /* Nothing to negotiate for a local user, so complete before returning. */
+-    xgr_async_complete( async, S_OK, local_user_handle() );
++    TRACE( "user handle async result: %Iu bytes.\n", sizeof(local_user_result) );
++    xgr_async_complete_ex( async, S_OK, &local_user_result, sizeof(local_user_result) );
+     return S_OK;
+ }
+ 
+@@ -243,7 +248,7 @@ static HRESULT WINAPI x_user_XUserAddResult( IXUserImpl6 *iface, XAsyncBlock *as
+     if (FAILED(hr)) return hr;
+ 
+     InterlockedIncrement( &local_user.ref );
+-    *newUser = payload;
++    *newUser = *(XUserHandle *)payload;
+     return S_OK;
+ }
+ 

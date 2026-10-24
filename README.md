@@ -27,10 +27,10 @@ ported to macOS:
 
 | Part | State |
 |---|---|
-| Mac engine build (CrossOver 26.3 + Highball patches) | building |
-| Xodus / Ferestre Wine patches on the Mac tree | porting |
-| xgameruntime on macOS | to do |
-| Xodus client for macOS | to do |
+| Patch port onto CrossOver 26.3 (79 commits in `engine/series/wine`) | done, compile-checked |
+| xgameruntime on macOS (service socket) | ported |
+| Mac engine build (GitHub Actions, Intel runner) | building |
+| Xodus client for macOS (28 commits in `engine/series/xodus`) | building |
 | Minecraft Dungeons (Store, MSIXVC) | untested |
 
 See [NOTICE.md](NOTICE.md) for components and licences.

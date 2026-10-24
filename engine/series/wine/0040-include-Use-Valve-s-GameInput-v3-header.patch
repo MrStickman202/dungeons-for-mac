@@ -1,0 +1,1400 @@
+From 7bc141ebd0f9c7b50321ed637e66be7547882f45 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?R=C3=A9mi=20Bernon?= <rbernon@codeweavers.com>
+Date: Sat, 24 Oct 2026 19:18:01 +0300
+Subject: [PATCH 40/79] include: Use Valve's GameInput v3 header.
+
+Matches the gameinput.dll implementation taken from Valve's tree (xodus-gaming/wine b1dd327).
+---
+ include/gameinput.idl | 815 ++++++++++++++++++++++++++++++++----------
+ 1 file changed, 617 insertions(+), 198 deletions(-)
+
+diff --git a/include/gameinput.idl b/include/gameinput.idl
+index 9b15e4a..f01bafb 100644
+--- a/include/gameinput.idl
++++ b/include/gameinput.idl
+@@ -20,10 +20,10 @@ import "unknwn.idl";
+ 
+ cpp_quote("#include <stdint.h>")
+ cpp_quote("#include <stdbool.h>")
+-cpp_quote("#define GAMEINPUT_API_VERSION 2")
++cpp_quote("#define GAMEINPUT_API_VERSION 3")
+ 
+ cpp_quote("#ifdef __cplusplus")
+-cpp_quote("namespace GameInput { namespace v2 {")
++cpp_quote("namespace GameInput { namespace v3 {")
+ cpp_quote("#endif /* __cplusplus */")
+ 
+ cpp_quote("#ifdef __WINESRC__")
+@@ -31,7 +31,7 @@ cpp_quote("# define GAMEINPUT_NAME(func) \\")
+ cpp_quote("    func##_must_be_suffixed_with_version_in_this_context \\")
+ cpp_quote("    func##_must_be_suffixed_with_version_in_this_context")
+ cpp_quote("#else  /* __WINESRC__ */")
+-cpp_quote("# define MAKE_GAMEINPUT_NAME_(func,ver) v ## ver ## _ ## func")
++cpp_quote("# define MAKE_GAMEINPUT_NAME_(func,ver) func ## _v ## ver")
+ cpp_quote("# define MAKE_GAMEINPUT_NAME(func,ver) MAKE_GAMEINPUT_NAME_(func,ver)")
+ cpp_quote("# define GAMEINPUT_NAME(func) MAKE_GAMEINPUT_NAME(func,GAMEINPUT_API_VERSION)")
+ cpp_quote("#endif  /* __WINESRC__ */")
+@@ -56,12 +56,15 @@ typedef enum GameInputBatteryStatus GameInputBatteryStatus;
+ typedef enum GameInputDeviceCapabilities GameInputDeviceCapabilities;
+ typedef enum GameInputDeviceFamily GameInputDeviceFamily;
+ typedef enum GameInputDeviceStatus GameInputDeviceStatus;
++typedef enum GameInputElementKind GameInputElementKind;
+ typedef enum GameInputEnumerationKind GameInputEnumerationKind;
+ typedef enum GameInputFeedbackAxes GameInputFeedbackAxes;
+ typedef enum GameInputFeedbackEffectState GameInputFeedbackEffectState;
++typedef enum GameInputFlightStickAxes GameInputFlightStickAxes;
+ typedef enum GameInputFlightStickButtons GameInputFlightStickButtons;
+ typedef enum GameInputFocusPolicy GameInputFocusPolicy;
+ typedef enum GameInputForceFeedbackEffectKind GameInputForceFeedbackEffectKind;
++typedef enum GameInputGamepadAxes GameInputGamepadAxes;
+ typedef enum GameInputGamepadButtons GameInputGamepadButtons;
+ typedef enum GameInputKeyboardKind GameInputKeyboardKind;
+ typedef enum GameInputKind GameInputKind;
+@@ -70,6 +73,7 @@ typedef enum GameInputLocation GameInputLocation;
+ typedef enum GameInputMotionAccuracy GameInputMotionAccuracy;
+ typedef enum GameInputMouseButtons GameInputMouseButtons;
+ typedef enum GameInputMousePositions GameInputMousePositions;
++typedef enum GameInputRacingWheelAxes GameInputRacingWheelAxes;
+ typedef enum GameInputRacingWheelButtons GameInputRacingWheelButtons;
+ typedef enum GameInputRawDeviceItemCollectionKind GameInputRawDeviceItemCollectionKind;
+ typedef enum GameInputRawDevicePhysicalUnitKind GameInputRawDevicePhysicalUnitKind;
+@@ -84,63 +88,90 @@ typedef enum GameInputSystemButtons GameInputSystemButtons;
+ typedef enum GameInputTouchShape GameInputTouchShape;
+ typedef enum GameInputUiNavigationButtons GameInputUiNavigationButtons;
+ 
+-typedef struct GameInputArcadeStickInfo GameInputArcadeStickInfo;
++typedef struct GameInputArcadeStickInfo_v0 GameInputArcadeStickInfo_v0;
++typedef struct GameInputArcadeStickInfo_v0 GameInputArcadeStickInfo_v1;
++typedef struct GameInputArcadeStickInfo_v0 GameInputArcadeStickInfo_v2;
++typedef struct GameInputArcadeStickInfo_v3 GameInputArcadeStickInfo_v3;
++cpp_quote("#define GameInputArcadeStickInfo GAMEINPUT_NAME(GameInputArcadeStickInfo)")
+ typedef struct GameInputArcadeStickState GameInputArcadeStickState;
++typedef struct GameInputAxisMapping GameInputAxisMapping;
+ typedef struct GameInputBatteryState GameInputBatteryState;
+-typedef struct v0_GameInputControllerAxisInfo v0_GameInputControllerAxisInfo;
+-typedef struct v1_GameInputControllerAxisInfo v1_GameInputControllerAxisInfo;
+-typedef struct v1_GameInputControllerAxisInfo v2_GameInputControllerAxisInfo;
++typedef struct GameInputButtonMapping GameInputButtonMapping;
++typedef struct GameInputControllerAxisInfo_v0 GameInputControllerAxisInfo_v0;
++typedef struct GameInputControllerAxisInfo_v1 GameInputControllerAxisInfo_v1;
++typedef struct GameInputControllerAxisInfo_v1 GameInputControllerAxisInfo_v2;
+ cpp_quote("#define GameInputControllerAxisInfo GAMEINPUT_NAME(GameInputControllerAxisInfo)")
+-typedef struct v0_GameInputControllerButtonInfo v0_GameInputControllerButtonInfo;
+-typedef struct v1_GameInputControllerButtonInfo v1_GameInputControllerButtonInfo;
+-typedef struct v1_GameInputControllerButtonInfo v2_GameInputControllerButtonInfo;
++typedef struct GameInputControllerButtonInfo_v0 GameInputControllerButtonInfo_v0;
++typedef struct GameInputControllerButtonInfo_v1 GameInputControllerButtonInfo_v1;
++typedef struct GameInputControllerButtonInfo_v1 GameInputControllerButtonInfo_v2;
+ cpp_quote("#define GameInputControllerButtonInfo GAMEINPUT_NAME(GameInputControllerButtonInfo)")
+-typedef struct v0_GameInputControllerSwitchInfo v0_GameInputControllerSwitchInfo;
+-typedef struct v1_GameInputControllerSwitchInfo v1_GameInputControllerSwitchInfo;
+-typedef struct v1_GameInputControllerSwitchInfo v2_GameInputControllerSwitchInfo;
++typedef struct GameInputControllerSwitchInfo_v0 GameInputControllerSwitchInfo_v0;
++typedef struct GameInputControllerSwitchInfo_v1 GameInputControllerSwitchInfo_v1;
++typedef struct GameInputControllerSwitchInfo_v1 GameInputControllerSwitchInfo_v2;
++typedef struct GameInputControllerSwitchInfo_v3 GameInputControllerSwitchInfo_v3;
+ cpp_quote("#define GameInputControllerSwitchInfo GAMEINPUT_NAME(GameInputControllerSwitchInfo)")
+-typedef struct v0_GameInputDeviceInfo v0_GameInputDeviceInfo;
+-typedef struct v1_GameInputDeviceInfo v1_GameInputDeviceInfo;
+-typedef struct v2_GameInputDeviceInfo v2_GameInputDeviceInfo;
++typedef struct GameInputControllerInfo GameInputControllerInfo;
++typedef struct GameInputDeviceInfo_v0 GameInputDeviceInfo_v0;
++typedef struct GameInputDeviceInfo_v1 GameInputDeviceInfo_v1;
++typedef struct GameInputDeviceInfo_v2 GameInputDeviceInfo_v2;
++typedef struct GameInputDeviceInfo_v3 GameInputDeviceInfo_v3;
+ cpp_quote("#define GameInputDeviceInfo GAMEINPUT_NAME(GameInputDeviceInfo)")
+-typedef struct GameInputFlightStickInfo GameInputFlightStickInfo;
++typedef struct GameInputFlightStickInfo_v0 GameInputFlightStickInfo_v0;
++typedef struct GameInputFlightStickInfo_v0 GameInputFlightStickInfo_v1;
++typedef struct GameInputFlightStickInfo_v0 GameInputFlightStickInfo_v2;
++typedef struct GameInputFlightStickInfo_v3 GameInputFlightStickInfo_v3;
++cpp_quote("#define GameInputFlightStickInfo GAMEINPUT_NAME(GameInputFlightStickInfo)")
+ typedef struct GameInputFlightStickState GameInputFlightStickState;
+ typedef struct GameInputForceFeedbackConditionParams GameInputForceFeedbackConditionParams;
+ typedef struct GameInputForceFeedbackConstantParams GameInputForceFeedbackConstantParams;
+ typedef struct GameInputForceFeedbackEnvelope GameInputForceFeedbackEnvelope;
+ typedef struct GameInputForceFeedbackMagnitude GameInputForceFeedbackMagnitude;
+-typedef struct v0_GameInputForceFeedbackMotorInfo v0_GameInputForceFeedbackMotorInfo;
+-typedef struct v1_GameInputForceFeedbackMotorInfo v1_GameInputForceFeedbackMotorInfo;
+-typedef struct v1_GameInputForceFeedbackMotorInfo v2_GameInputForceFeedbackMotorInfo;
++typedef struct GameInputForceFeedbackMotorInfo_v0 GameInputForceFeedbackMotorInfo_v0;
++typedef struct GameInputForceFeedbackMotorInfo_v1 GameInputForceFeedbackMotorInfo_v1;
++typedef struct GameInputForceFeedbackMotorInfo_v1 GameInputForceFeedbackMotorInfo_v2;
++typedef struct GameInputForceFeedbackMotorInfo_v1 GameInputForceFeedbackMotorInfo_v3;
+ cpp_quote("#define GameInputForceFeedbackMotorInfo GAMEINPUT_NAME(GameInputForceFeedbackMotorInfo)")
+ typedef struct GameInputForceFeedbackParams GameInputForceFeedbackParams;
+ typedef struct GameInputForceFeedbackPeriodicParams GameInputForceFeedbackPeriodicParams;
+ typedef struct GameInputForceFeedbackRampParams GameInputForceFeedbackRampParams;
+-typedef struct GameInputGamepadInfo GameInputGamepadInfo;
++typedef struct GameInputGamepadInfo_v0 GameInputGamepadInfo_v0;
++typedef struct GameInputGamepadInfo_v0 GameInputGamepadInfo_v1;
++typedef struct GameInputGamepadInfo_v0 GameInputGamepadInfo_v2;
++typedef struct GameInputGamepadInfo_v3 GameInputGamepadInfo_v3;
++cpp_quote("#define GameInputGamepadInfo GAMEINPUT_NAME(GameInputGamepadInfo)")
+ typedef struct GameInputGamepadState GameInputGamepadState;
+ typedef struct GameInputHapticFeedbackMotorInfo GameInputHapticFeedbackMotorInfo;
+ typedef struct GameInputHapticFeedbackParams GameInputHapticFeedbackParams;
+ typedef struct GameInputHapticInfo GameInputHapticInfo;
+ typedef struct GameInputHapticWaveformInfo GameInputHapticWaveformInfo;
+-typedef struct v0_GameInputKeyboardInfo v0_GameInputKeyboardInfo;
+-typedef struct v1_GameInputKeyboardInfo v1_GameInputKeyboardInfo;
+-typedef struct v1_GameInputKeyboardInfo v2_GameInputKeyboardInfo;
++typedef struct GameInputKeyboardInfo_v0 GameInputKeyboardInfo_v0;
++typedef struct GameInputKeyboardInfo_v1 GameInputKeyboardInfo_v1;
++typedef struct GameInputKeyboardInfo_v1 GameInputKeyboardInfo_v2;
++typedef struct GameInputKeyboardInfo_v1 GameInputKeyboardInfo_v3;
+ cpp_quote("#define GameInputKeyboardInfo GAMEINPUT_NAME(GameInputKeyboardInfo)")
+ typedef struct GameInputKeyState GameInputKeyState;
+ typedef struct GameInputMotionInfo GameInputMotionInfo;
+ typedef struct GameInputMotionState GameInputMotionState;
+-typedef struct v0_GameInputMouseInfo v0_GameInputMouseInfo;
+-typedef struct v1_GameInputMouseInfo v1_GameInputMouseInfo;
+-typedef struct v1_GameInputMouseInfo v2_GameInputMouseInfo;
++typedef struct GameInputMouseInfo_v0 GameInputMouseInfo_v0;
++typedef struct GameInputMouseInfo_v1 GameInputMouseInfo_v1;
++typedef struct GameInputMouseInfo_v1 GameInputMouseInfo_v2;
++typedef struct GameInputMouseInfo_v1 GameInputMouseInfo_v3;
+ cpp_quote("#define GameInputMouseInfo GAMEINPUT_NAME(GameInputMouseInfo)")
+-typedef struct v0_GameInputMouseState v0_GameInputMouseState;
+-typedef struct v1_GameInputMouseState v1_GameInputMouseState;
+-typedef struct v1_GameInputMouseState v2_GameInputMouseState;
++typedef struct GameInputMouseState_v0 GameInputMouseState_v0;
++typedef struct GameInputMouseState_v1 GameInputMouseState_v1;
++typedef struct GameInputMouseState_v1 GameInputMouseState_v2;
++typedef struct GameInputMouseState_v1 GameInputMouseState_v3;
+ cpp_quote("#define GameInputMouseState GAMEINPUT_NAME(GameInputMouseState)")
+-typedef struct GameInputRacingWheelInfo GameInputRacingWheelInfo;
++typedef struct GameInputRacingWheelInfo_v0 GameInputRacingWheelInfo_v0;
++typedef struct GameInputRacingWheelInfo_v0 GameInputRacingWheelInfo_v1;
++typedef struct GameInputRacingWheelInfo_v0 GameInputRacingWheelInfo_v2;
++typedef struct GameInputRacingWheelInfo_v3 GameInputRacingWheelInfo_v3;
++cpp_quote("#define GameInputRacingWheelInfo GAMEINPUT_NAME(GameInputRacingWheelInfo)")
+ typedef struct GameInputRacingWheelState GameInputRacingWheelState;
+ typedef struct GameInputRawDeviceItemCollectionInfo GameInputRawDeviceItemCollectionInfo;
+-typedef struct GameInputRawDeviceReportInfo GameInputRawDeviceReportInfo;
++typedef struct GameInputRawDeviceReportInfo_v0 GameInputRawDeviceReportInfo_v0;
++typedef struct GameInputRawDeviceReportInfo_v3 GameInputRawDeviceReportInfo_v3;
++cpp_quote("#define GameInputRawDeviceReportInfo GAMEINPUT_NAME(GameInputRawDeviceReportInfo)")
+ typedef struct GameInputRawDeviceReportItemInfo GameInputRawDeviceReportItemInfo;
+ typedef struct GameInputRumbleParams GameInputRumbleParams;
+ typedef struct GameInputSensorsInfo GameInputSensorsInfo;
+@@ -153,23 +184,30 @@ typedef struct GameInputUiNavigationState GameInputUiNavigationState;
+ typedef struct GameInputUsage GameInputUsage;
+ typedef struct GameInputVersion GameInputVersion;
+ 
+-interface v0_IGameInput;
+-interface v1_IGameInput;
+-interface v2_IGameInput;
++interface IGameInput_v0;
++interface IGameInput_v1;
++interface IGameInput_v2;
++interface IGameInput_v3;
+ cpp_quote("#define IGameInput GAMEINPUT_NAME(IGameInput)")
+-interface v0_IGameInputReading;
+-interface v1_IGameInputReading;
+-interface v2_IGameInputReading;
++interface IGameInputReading_v0;
++interface IGameInputReading_v1;
++interface IGameInputReading_v2;
++interface IGameInputReading_v3;
+ cpp_quote("#define IGameInputReading GAMEINPUT_NAME(IGameInputReading)")
+-interface v0_IGameInputDevice;
+-interface v1_IGameInputDevice;
+-interface v2_IGameInputDevice;
++interface IGameInputDevice_v0;
++interface IGameInputDevice_v1;
++interface IGameInputDevice_v2;
++interface IGameInputDevice_v3;
+ cpp_quote("#define IGameInputDevice GAMEINPUT_NAME(IGameInputDevice)")
+ interface IGameInputDispatcher;
+-interface v0_IGameInputForceFeedbackEffect;
+-interface v2_IGameInputForceFeedbackEffect;
++interface IGameInputForceFeedbackEffect_v0;
++interface IGameInputForceFeedbackEffect_v2;
++interface IGameInputForceFeedbackEffect_v3;
+ cpp_quote("#define IGameInputForceFeedbackEffect GAMEINPUT_NAME(IGameInputForceFeedbackEffect)")
+-interface IGameInputRawDeviceReport;
++interface IGameInputRawDeviceReport_v0;
++interface IGameInputRawDeviceReport_v3;
++cpp_quote("#define IGameInputRawDeviceReport GAMEINPUT_NAME(IGameInputRawDeviceReport)")
++interface IGameInputMapper; /* v3 */
+ 
+ typedef uint64_t GameInputCallbackToken;
+ 
+@@ -185,27 +223,31 @@ cpp_quote("DEFINE_GUID(GAMEINPUT_HAPTIC_LOCATION_TRIGGER_RIGHT, 0xff0cb557, 0x3a
+ const uint32_t GAMEINPUT_HAPTIC_MAX_LOCATIONS = 8; /* v2 */
+ const uint32_t GAMEINPUT_HAPTIC_MAX_AUDIO_ENDPOINT_ID_SIZE = 256; /* v2 */
+ 
+-typedef void (__stdcall *v0_GameInputReadingCallback)( GameInputCallbackToken token, void *context, v0_IGameInputReading *reading, bool has_overrun );
+-typedef void (__stdcall *v1_GameInputReadingCallback)( GameInputCallbackToken token, void *context, v1_IGameInputReading *reading );
+-typedef void (__stdcall *v2_GameInputReadingCallback)( GameInputCallbackToken token, void *context, v2_IGameInputReading *reading );
++typedef void (__stdcall *GameInputReadingCallback_v0)( GameInputCallbackToken token, void *context, IGameInputReading_v0 *reading, bool has_overrun );
++typedef void (__stdcall *GameInputReadingCallback_v1)( GameInputCallbackToken token, void *context, IGameInputReading_v1 *reading );
++typedef void (__stdcall *GameInputReadingCallback_v2)( GameInputCallbackToken token, void *context, IGameInputReading_v2 *reading );
++typedef void (__stdcall *GameInputReadingCallback_v3)( GameInputCallbackToken token, void *context, IGameInputReading_v3 *reading );
+ cpp_quote("#define GameInputReadingCallback GAMEINPUT_NAME(GameInputReadingCallback)")
+-typedef void (__stdcall *v0_GameInputDeviceCallback)( GameInputCallbackToken token, void *context, v0_IGameInputDevice *device, uint64_t timestamp, GameInputDeviceStatus current_status, GameInputDeviceStatus previous_status );
+-typedef void (__stdcall *v1_GameInputDeviceCallback)( GameInputCallbackToken token, void *context, v1_IGameInputDevice *device, uint64_t timestamp, GameInputDeviceStatus current_status, GameInputDeviceStatus previous_status );
+-typedef void (__stdcall *v2_GameInputDeviceCallback)( GameInputCallbackToken token, void *context, v2_IGameInputDevice *device, uint64_t timestamp, GameInputDeviceStatus current_status, GameInputDeviceStatus previous_status );
++typedef void (__stdcall *GameInputDeviceCallback_v0)( GameInputCallbackToken token, void *context, IGameInputDevice_v0 *device, uint64_t timestamp, GameInputDeviceStatus current_status, GameInputDeviceStatus previous_status );
++typedef void (__stdcall *GameInputDeviceCallback_v1)( GameInputCallbackToken token, void *context, IGameInputDevice_v1 *device, uint64_t timestamp, GameInputDeviceStatus current_status, GameInputDeviceStatus previous_status );
++typedef void (__stdcall *GameInputDeviceCallback_v2)( GameInputCallbackToken token, void *context, IGameInputDevice_v2 *device, uint64_t timestamp, GameInputDeviceStatus current_status, GameInputDeviceStatus previous_status );
++typedef void (__stdcall *GameInputDeviceCallback_v3)( GameInputCallbackToken token, void *context, IGameInputDevice_v3 *device, uint64_t timestamp, GameInputDeviceStatus current_status, GameInputDeviceStatus previous_status );
+ cpp_quote("#define GameInputDeviceCallback GAMEINPUT_NAME(GameInputDeviceCallback)")
+-typedef void (__stdcall *v0_GameInputSystemButtonCallback)( GameInputCallbackToken token, void *context, v0_IGameInputDevice *device, uint64_t timestamp, GameInputSystemButtons current_buttons, GameInputSystemButtons previous_buttons );
+-typedef void (__stdcall *v1_GameInputSystemButtonCallback)( GameInputCallbackToken token, void *context, v1_IGameInputDevice *device, uint64_t timestamp, GameInputSystemButtons current_buttons, GameInputSystemButtons previous_buttons );
+-typedef void (__stdcall *v2_GameInputSystemButtonCallback)( GameInputCallbackToken token, void *context, v2_IGameInputDevice *device, uint64_t timestamp, GameInputSystemButtons current_buttons, GameInputSystemButtons previous_buttons );
++typedef void (__stdcall *GameInputSystemButtonCallback_v0)( GameInputCallbackToken token, void *context, IGameInputDevice_v0 *device, uint64_t timestamp, GameInputSystemButtons current_buttons, GameInputSystemButtons previous_buttons );
++typedef void (__stdcall *GameInputSystemButtonCallback_v1)( GameInputCallbackToken token, void *context, IGameInputDevice_v1 *device, uint64_t timestamp, GameInputSystemButtons current_buttons, GameInputSystemButtons previous_buttons );
++typedef void (__stdcall *GameInputSystemButtonCallback_v2)( GameInputCallbackToken token, void *context, IGameInputDevice_v2 *device, uint64_t timestamp, GameInputSystemButtons current_buttons, GameInputSystemButtons previous_buttons );
++typedef void (__stdcall *GameInputSystemButtonCallback_v3)( GameInputCallbackToken token, void *context, IGameInputDevice_v3 *device, uint64_t timestamp, GameInputSystemButtons current_buttons, GameInputSystemButtons previous_buttons );
+ cpp_quote("#define GameInputSystemButtonCallback GAMEINPUT_NAME(GameInputSystemButtonCallback)")
+-typedef void (__stdcall *v0_GameInputKeyboardLayoutCallback)( GameInputCallbackToken token, void *context, v0_IGameInputDevice *device, uint64_t timestamp, uint32_t current_layout, uint32_t previous_layout );
+-typedef void (__stdcall *v1_GameInputKeyboardLayoutCallback)( GameInputCallbackToken token, void *context, v1_IGameInputDevice *device, uint64_t timestamp, uint32_t current_layout, uint32_t previous_layout );
+-typedef void (__stdcall *v2_GameInputKeyboardLayoutCallback)( GameInputCallbackToken token, void *context, v2_IGameInputDevice *device, uint64_t timestamp, uint32_t current_layout, uint32_t previous_layout );
++typedef void (__stdcall *GameInputKeyboardLayoutCallback_v0)( GameInputCallbackToken token, void *context, IGameInputDevice_v0 *device, uint64_t timestamp, uint32_t current_layout, uint32_t previous_layout );
++typedef void (__stdcall *GameInputKeyboardLayoutCallback_v1)( GameInputCallbackToken token, void *context, IGameInputDevice_v1 *device, uint64_t timestamp, uint32_t current_layout, uint32_t previous_layout );
++typedef void (__stdcall *GameInputKeyboardLayoutCallback_v2)( GameInputCallbackToken token, void *context, IGameInputDevice_v2 *device, uint64_t timestamp, uint32_t current_layout, uint32_t previous_layout );
++typedef void (__stdcall *GameInputKeyboardLayoutCallback_v3)( GameInputCallbackToken token, void *context, IGameInputDevice_v3 *device, uint64_t timestamp, uint32_t current_layout, uint32_t previous_layout );
+ cpp_quote("#define GameInputKeyboardLayoutCallback GAMEINPUT_NAME(GameInputKeyboardLayoutCallback)")
+ 
+ enum GameInputKind
+ {
+     GameInputKindUnknown = 0x00000000,
+-    GameInputKindRawDeviceReport = 0x00000001, /* v0 */
++    GameInputKindRawDeviceReport = 0x00000001, /* v0, v3 */
+     GameInputKindControllerAxis = 0x00000002,
+     GameInputKindControllerButton = 0x00000004,
+     GameInputKindControllerSwitch = 0x00000008,
+@@ -219,8 +261,11 @@ enum GameInputKind
+     GameInputKindFlightStick = 0x00020000,
+     GameInputKindGamepad = 0x00040000,
+     GameInputKindRacingWheel = 0x00080000,
+-    GameInputKindUiNavigation = 0x01000000,
++    GameInputKindUiNavigation_v0 = 0x01000000, /* v0, v1, v2 */
++    GameInputKindUiNavigation_v1 = GameInputKindUiNavigation_v0,
++    GameInputKindUiNavigation_v2 = GameInputKindUiNavigation_v0,
+ };
++cpp_quote("#define GameInputKindUiNavigation GAMEINPUT_NAME(GameInputKindUiNavigation)")
+ 
+ enum GameInputEnumerationKind
+ {
+@@ -357,6 +402,16 @@ enum GameInputFlightStickButtons
+     GameInputFlightStickView = 0x00000002,
+     GameInputFlightStickFirePrimary = 0x00000004,
+     GameInputFlightStickFireSecondary = 0x00000008,
++    GameInputFlightStickHatSwitchUp = 0x00000010, /* v3 */
++    GameInputFlightStickHatSwitchDown = 0x00000020, /* v3 */
++    GameInputFlightStickHatSwitchLeft = 0x00000040, /* v3 */
++    GameInputFlightStickHatSwitchRight = 0x00000080, /* v3 */
++    GameInputFlightStickA = 0x00000100, /* v3 */
++    GameInputFlightStickB = 0x00000200, /* v3 */
++    GameInputFlightStickX = 0x00000400, /* v3 */
++    GameInputFlightStickY = 0x00000800, /* v3 */
++    GameInputFlightStickLeftShoulder = 0x00001000, /* v3 */
++    GameInputFlightStickRightShoulder = 0x00002000, /* v3 */
+ };
+ 
+ enum GameInputGamepadButtons
+@@ -366,17 +421,54 @@ enum GameInputGamepadButtons
+     GameInputGamepadView = 0x00000002,
+     GameInputGamepadA = 0x00000004,
+     GameInputGamepadB = 0x00000008,
++    GameInputGamepadC = 0x00004000, /* v3 */
+     GameInputGamepadX = 0x00000010,
+     GameInputGamepadY = 0x00000020,
++    GameInputGamepadZ = 0x00008000, /* v3 */
+     GameInputGamepadDPadUp = 0x00000040,
+     GameInputGamepadDPadDown = 0x00000080,
+     GameInputGamepadDPadLeft = 0x00000100,
+     GameInputGamepadDPadRight = 0x00000200,
+     GameInputGamepadLeftShoulder = 0x00000400,
+     GameInputGamepadRightShoulder = 0x00000800,
++    GameInputGamepadLeftTriggerButton = 0x00010000, /* v3 */
++    GameInputGamepadRightTriggerButton = 0x00020000, /* v3 */
+     GameInputGamepadLeftThumbstick = 0x00001000,
++    GameInputGamepadLeftThumbstickUp = 0x00040000, /* v3 */
++    GameInputGamepadLeftThumbstickDown = 0x00080000, /* v3 */
++    GameInputGamepadLeftThumbstickLeft = 0x00100000, /* v3 */
++    GameInputGamepadLeftThumbstickRight = 0x00200000, /* v3 */
+     GameInputGamepadRightThumbstick = 0x00002000,
+-};
++    GameInputGamepadRightThumbstickUp = 0x00400000, /* v3 */
++    GameInputGamepadRightThumbstickDown = 0x00800000, /* v3 */
++    GameInputGamepadRightThumbstickLeft = 0x01000000, /* v3 */
++    GameInputGamepadRightThumbstickRight = 0x02000000, /* v3 */
++    GameInputGamepadPaddleLeft1 = 0x04000000, /* v3 */
++    GameInputGamepadPaddleLeft2 = 0x08000000, /* v3 */
++    GameInputGamepadPaddleRight1 = 0x10000000, /* v3 */
++    GameInputGamepadPaddleRight2 = 0x20000000, /* v3 */
++};
++
++const GameInputGamepadButtons GameInputGamepadModuleSystemDuo = GameInputGamepadMenu | GameInputGamepadView;
++const GameInputGamepadButtons GameInputGamepadModuleDpad = GameInputGamepadDPadUp | GameInputGamepadDPadDown |
++                                                           GameInputGamepadDPadLeft | GameInputGamepadDPadRight;
++const GameInputGamepadButtons GameInputGamepadModuleShoulders = GameInputGamepadLeftShoulder | GameInputGamepadRightShoulder;
++const GameInputGamepadButtons GameInputGamepadModuleTriggers = GameInputGamepadLeftTriggerButton | GameInputGamepadRightTriggerButton;
++const GameInputGamepadButtons GameInputGamepadModuleThumbsticks = GameInputGamepadLeftThumbstickUp | GameInputGamepadLeftThumbstickDown |
++                                                                  GameInputGamepadLeftThumbstickLeft | GameInputGamepadLeftThumbstickRight |
++                                                                  GameInputGamepadRightThumbstickUp | GameInputGamepadRightThumbstickDown |
++                                                                  GameInputGamepadRightThumbstickLeft | GameInputGamepadRightThumbstickRight;
++const GameInputGamepadButtons GameInputGamepadModulePaddles2 = GameInputGamepadPaddleLeft1 | GameInputGamepadPaddleRight1;
++const GameInputGamepadButtons GameInputGamepadModulePaddles4 = GameInputGamepadPaddleLeft1 | GameInputGamepadPaddleLeft2 |
++                                                               GameInputGamepadPaddleRight1 | GameInputGamepadPaddleRight2;
++const GameInputGamepadButtons GameInputGamepadLayoutBasic = GameInputGamepadModuleSystemDuo | GameInputGamepadModuleDpad |
++                                                            GameInputGamepadA | GameInputGamepadB;
++const GameInputGamepadButtons GameInputGamepadLayoutButtons = GameInputGamepadLayoutBasic | GameInputGamepadX |
++                                                              GameInputGamepadY | GameInputGamepadModuleShoulders;
++const GameInputGamepadButtons GameInputGamepadLayoutStandard = GameInputGamepadLayoutButtons | GameInputGamepadModuleTriggers |
++                                                               GameInputGamepadModuleThumbsticks | GameInputGamepadLeftThumbstick |
++                                                               GameInputGamepadRightThumbstick;
++const GameInputGamepadButtons GameInputGamepadLayoutElite = GameInputGamepadLayoutStandard | GameInputGamepadModulePaddles4;
+ 
+ enum GameInputRacingWheelButtons
+ {
+@@ -385,13 +477,19 @@ enum GameInputRacingWheelButtons
+     GameInputRacingWheelView = 0x00000002,
+     GameInputRacingWheelPreviousGear = 0x00000004,
+     GameInputRacingWheelNextGear = 0x00000008,
++    GameInputRacingWheelA = 0x00000100,
++    GameInputRacingWheelB = 0x00000200,
++    GameInputRacingWheelX = 0x00000400,
++    GameInputRacingWheelY = 0x00000800,
+     GameInputRacingWheelDpadUp = 0x00000010,
+     GameInputRacingWheelDpadDown = 0x00000020,
+     GameInputRacingWheelDpadLeft = 0x00000040,
+     GameInputRacingWheelDpadRight = 0x00000080,
++    GameInputRacingWheelLeftThumbstick = 0x00001000,
++    GameInputRacingWheelRightThumbstick = 0x00002000,
+ };
+ 
+-enum GameInputUiNavigationButtons
++enum GameInputUiNavigationButtons /* v0, v1, v2 */
+ {
+     GameInputUiNavigationNone = 0x00000000,
+     GameInputUiNavigationMenu = 0x00000001,
+@@ -416,13 +514,44 @@ enum GameInputUiNavigationButtons
+     GameInputUiNavigationScrollRight = 0x00080000,
+ };
+ 
+-enum GameInputSystemButtons /* v0, v1, v2 */
++enum GameInputSystemButtons
+ {
+     GameInputSystemButtonNone = 0x00000000,
+     GameInputSystemButtonGuide = 0x00000001,
+     GameInputSystemButtonShare = 0x00000002,
+ };
+ 
++enum GameInputFlightStickAxes /* v3 */
++{
++    GameInputFlightStickAxesNone = 0x00000000,
++    GameInputFlightStickRoll = 0x00000010,
++    GameInputFlightStickPitch = 0x00000020,
++    GameInputFlightStickYaw = 0x00000040,
++    GameInputFlightStickThrottle = 0x00000080,
++};
++
++enum GameInputGamepadAxes /* v3 */
++{
++    GameInputGamepadAxesNone = 0x00000000,
++    GameInputGamepadLeftTrigger = 0x00000001,
++    GameInputGamepadRightTrigger = 0x00000002,
++    GameInputGamepadLeftThumbstickX = 0x00000004,
++    GameInputGamepadLeftThumbstickY = 0x00000008,
++    GameInputGamepadRightThumbstickX = 0x00000010,
++    GameInputGamepadRightThumbstickY = 0x00000020,
++};
++
++enum GameInputRacingWheelAxes /* v3 */
++{
++    GameInputRacingWheelAxesNone = 0x00000000,
++    GameInputRacingWheelSteering = 0x00000100,
++    GameInputRacingWheelThrottle = 0x00000200,
++    GameInputRacingWheelBrake = 0x00000400,
++    GameInputRacingWheelClutch = 0x00000800,
++    GameInputRacingWheelHandbrake = 0x00001000,
++    GameInputRacingWheelPatternShifter = 0x00002000,
++};
++
+ enum GameInputDeviceStatus
+ {
+     GameInputDeviceNoStatus = 0x00000000,
+@@ -436,9 +565,10 @@ enum GameInputDeviceStatus
+     GameInputDeviceWireless = 0x00000080, /* v0 */
+     GameInputDeviceUserIdle = 0x00100000, /* v0 */
+     GameInputDeviceHapticInfoReady = 0x00200000, /* v2 */
+-    v0_GameInputDeviceAnyStatus = 0x00ffffff, /* v0 */
+-    v1_GameInputDeviceAnyStatus = 0xffffffff, /* v1, v2 */
+-    v2_GameInputDeviceAnyStatus = 0xffffffff, /* v1, v2 */
++    GameInputDeviceAnyStatus_v0 = 0x00ffffff, /* v0 */
++    GameInputDeviceAnyStatus_v1 = 0xffffffff, /* v1, v2, v3 */
++    GameInputDeviceAnyStatus_v2 = GameInputDeviceAnyStatus_v1,
++    GameInputDeviceAnyStatus_v3 = GameInputDeviceAnyStatus_v1,
+ };
+ cpp_quote("#define GameInputDeviceAnyStatus GAMEINPUT_NAME(GameInputDeviceAnyStatus)")
+ 
+@@ -454,12 +584,18 @@ enum GameInputBatteryStatus /* v0 */
+ enum GameInputDeviceFamily
+ {
+     GameInputFamilyVirtual = -1,
+-    GameInputFamilyAggregate = 0,
++    GameInputFamilyAggregate_v0 = 0, /* v0, v1, v2 */
++    GameInputFamilyAggregate_v1 = GameInputFamilyAggregate_v0,
++    GameInputFamilyAggregate_v2 = GameInputFamilyAggregate_v0,
++    GameInputFamilyAggregate_v3 = 5,
++    GameInputFamilyUnknown_v3 = 0, /* v3 */
+     GameInputFamilyXboxOne = 1,
+     GameInputFamilyXbox360 = 2,
+     GameInputFamilyHid = 3,
+     GameInputFamilyI8042 = 4,
+ };
++cpp_quote("#define GameInputFamilyAggregate GAMEINPUT_NAME(GameInputFamilyAggregate)")
++cpp_quote("#define GameInputFamilyUnknown GAMEINPUT_NAME(GameInputFamilyUnknown)")
+ 
+ enum GameInputDeviceCapabilities /* v0 */
+ {
+@@ -471,12 +607,13 @@ enum GameInputDeviceCapabilities /* v0 */
+     GameInputDeviceCapabilityWireless = 0x00000010,
+ };
+ 
+-enum GameInputRawDeviceReportKind /* v0 */
++enum GameInputRawDeviceReportKind /* v0, v3 */
+ {
+     GameInputRawInputReport = 0,
+     GameInputRawOutputReport = 1,
+-    GameInputRawFeatureReport = 2,
++    GameInputRawFeatureReport_v0 = 2, /* v0 */
+ };
++cpp_quote("#define GameInputRawFeatureReport GAMEINPUT_NAME(GameInputRawFeatureReport)")
+ 
+ enum GameInputRawDeviceReportItemFlags /* v0 */
+ {
+@@ -657,11 +794,31 @@ enum GameInputLabel
+     GameInputLabelR1 = 118,
+     GameInputLabelR2 = 119,
+     GameInputLabelR3 = 120,
+-    GameInputLabelP1 = 121,
+-    GameInputLabelP2 = 122,
+-    GameInputLabelP3 = 123,
+-    GameInputLabelP4 = 124,
+-};
++    GameInputLabelP1_v0 = 121, /* v0, v1, v2 */
++    GameInputLabelP1_v1 = GameInputLabelP1_v0,
++    GameInputLabelP1_v2 = GameInputLabelP1_v0,
++    GameInputLabelP2_v0 = 122, /* v0, v1, v2 */
++    GameInputLabelP2_v1 = GameInputLabelP2_v0,
++    GameInputLabelP2_v2 = GameInputLabelP2_v0,
++    GameInputLabelP3_v0 = 123, /* v0, v1, v2 */
++    GameInputLabelP3_v1 = GameInputLabelP3_v0,
++    GameInputLabelP3_v2 = GameInputLabelP3_v0,
++    GameInputLabelP4_v0 = 124, /* v0, v1, v2 */
++    GameInputLabelP4_v1 = GameInputLabelP4_v0,
++    GameInputLabelP4_v2 = GameInputLabelP4_v0,
++    GameInputLabelPaddleLeft1_v3 = 121,
++    GameInputLabelPaddleLeft2_v3 = 122,
++    GameInputLabelPaddleRight1_v3 = 123,
++    GameInputLabelPaddleRight2_v3 = 124,
++};
++cpp_quote("#define GameInputLabelP1 GAMEINPUT_NAME(GameInputLabelP1)")
++cpp_quote("#define GameInputLabelP2 GAMEINPUT_NAME(GameInputLabelP2)")
++cpp_quote("#define GameInputLabelP3 GAMEINPUT_NAME(GameInputLabelP3)")
++cpp_quote("#define GameInputLabelP4 GAMEINPUT_NAME(GameInputLabelP4)")
++cpp_quote("#define GameInputLabelPaddleLeft1 GAMEINPUT_NAME(GameInputLabelPaddleLeft1)")
++cpp_quote("#define GameInputLabelPaddleLeft2 GAMEINPUT_NAME(GameInputLabelPaddleLeft2)")
++cpp_quote("#define GameInputLabelPaddleRight1 GAMEINPUT_NAME(GameInputLabelPaddleRight1)")
++cpp_quote("#define GameInputLabelPaddleRight2 GAMEINPUT_NAME(GameInputLabelPaddleRight2)")
+ 
+ enum GameInputLocation /* v0 */
+ {
+@@ -718,6 +875,14 @@ enum GameInputRumbleMotors
+     GameInputRumbleRightTrigger = 0x00000008,
+ };
+ 
++enum GameInputElementKind /* v3 */
++{
++    GameInputElementKindNone = 0,
++    GameInputElementKindAxis = 1,
++    GameInputElementKindButton = 2,
++    GameInputElementKindSwitch = 3,
++};
++
+ struct GameInputKeyState
+ {
+     uint32_t scanCode;
+@@ -726,7 +891,7 @@ struct GameInputKeyState
+     bool isDeadKey;
+ };
+ 
+-struct v0_GameInputMouseState
++struct GameInputMouseState_v0
+ {
+     GameInputMouseButtons buttons;
+     int64_t positionX;
+@@ -735,7 +900,7 @@ struct v0_GameInputMouseState
+     int64_t wheelY;
+ };
+ 
+-struct v1_GameInputMouseState /* v1, v2 */
++struct GameInputMouseState_v1 /* v1, v2, v3 */
+ {
+     GameInputMouseButtons buttons;
+     GameInputMousePositions positions;
+@@ -843,7 +1008,7 @@ struct GameInputRacingWheelState
+     float handbrake;
+ };
+ 
+-struct GameInputUiNavigationState
++struct GameInputUiNavigationState /* v0, v1, v2 */
+ {
+     GameInputUiNavigationButtons buttons;
+ };
+@@ -904,7 +1069,7 @@ struct GameInputRawDeviceReportItemInfo /* v0 */
+     const GameInputString *itemString;
+ };
+ 
+-struct GameInputRawDeviceReportInfo /* v0 */
++struct GameInputRawDeviceReportInfo_v0 /* v0 */
+ {
+     GameInputRawDeviceReportKind kind;
+     uint32_t id;
+@@ -913,7 +1078,14 @@ struct GameInputRawDeviceReportInfo /* v0 */
+     const GameInputRawDeviceReportItemInfo *items;
+ };
+ 
+-struct v0_GameInputControllerAxisInfo
++struct GameInputRawDeviceReportInfo_v3 /* v3 */
++{
++    GameInputRawDeviceReportKind kind;
++    uint32_t id;
++    uint32_t size;
++};
++
++struct GameInputControllerAxisInfo_v0
+ {
+     GameInputKind mappedInputKinds;
+     GameInputLabel label;
+@@ -926,34 +1098,34 @@ struct v0_GameInputControllerAxisInfo
+     uint16_t legacyDInputIndex;
+     uint16_t legacyHidIndex;
+     uint32_t rawReportIndex;
+-    const GameInputRawDeviceReportInfo *inputReport;
++    const GameInputRawDeviceReportInfo_v0 *inputReport;
+     const GameInputRawDeviceReportItemInfo *inputReportItem;
+ };
+ 
+-struct v1_GameInputControllerAxisInfo /* v1, v2 */
++struct GameInputControllerAxisInfo_v1 /* v1, v2 */
+ {
+     GameInputKind mappedInputKinds;
+     GameInputLabel label;
+ };
+ 
+-struct v0_GameInputControllerButtonInfo
++struct GameInputControllerButtonInfo_v0
+ {
+     GameInputKind mappedInputKinds;
+     GameInputLabel label;
+     uint16_t legacyDInputIndex;
+     uint16_t legacyHidIndex;
+     uint32_t rawReportIndex;
+-    const GameInputRawDeviceReportInfo *inputReport;
++    const GameInputRawDeviceReportInfo_v0 *inputReport;
+     const GameInputRawDeviceReportItemInfo *inputReportItem;
+ };
+ 
+-struct v1_GameInputControllerButtonInfo /* v1, v2 */
++struct GameInputControllerButtonInfo_v1 /* v1, v2 */
+ {
+     GameInputKind mappedInputKinds;
+     GameInputLabel label;
+ };
+ 
+-struct v0_GameInputControllerSwitchInfo
++struct GameInputControllerSwitchInfo_v0
+ {
+     GameInputKind mappedInputKinds;
+     GameInputLabel label;
+@@ -962,18 +1134,36 @@ struct v0_GameInputControllerSwitchInfo
+     uint16_t legacyDInputIndex;
+     uint16_t legacyHidIndex;
+     uint32_t rawReportIndex;
+-    const GameInputRawDeviceReportInfo *inputReport;
++    const GameInputRawDeviceReportInfo_v0 *inputReport;
+     const GameInputRawDeviceReportItemInfo *inputReportItem;
+ };
+ 
+-struct v1_GameInputControllerSwitchInfo /* v1, v2 */
++struct GameInputControllerSwitchInfo_v1 /* v1, v2 */
+ {
+     GameInputKind mappedInputKinds;
+     GameInputLabel label;
+     GameInputSwitchKind kind;
+ };
+ 
+-struct v0_GameInputKeyboardInfo
++const uint32_t GAMEINPUT_MAX_SWITCH_STATES = 8;
++
++struct GameInputControllerSwitchInfo_v3
++{
++    GameInputLabel labels[GAMEINPUT_MAX_SWITCH_STATES];
++    GameInputSwitchKind kind;
++};
++
++struct GameInputControllerInfo /* v3 */
++{
++    uint32_t controllerAxisCount;
++    const GameInputLabel *controllerAxisLabels;
++    uint32_t controllerButtonCounts;
++    const GameInputLabel *controllerButtonLabels;
++    uint32_t controllerSwitchCounts;
++    const GameInputControllerSwitchInfo_v3 *controllerSwitchInfo;
++};
++
++struct GameInputKeyboardInfo_v0
+ {
+     GameInputKeyboardKind kind;
+     uint32_t layout;
+@@ -985,7 +1175,7 @@ struct v0_GameInputKeyboardInfo
+     const GameInputString *nativeLanguage;
+ };
+ 
+-struct v1_GameInputKeyboardInfo /* v1, v2 */
++struct GameInputKeyboardInfo_v1 /* v1, v2, v3 */
+ {
+     GameInputKeyboardKind kind;
+     uint32_t layout;
+@@ -996,7 +1186,7 @@ struct v1_GameInputKeyboardInfo /* v1, v2 */
+     uint32_t platformSubtype;
+ };
+ 
+-struct v0_GameInputMouseInfo
++struct GameInputMouseInfo_v0
+ {
+     GameInputMouseButtons supportedButtons;
+     uint32_t sampleRate;
+@@ -1005,7 +1195,7 @@ struct v0_GameInputMouseInfo
+     bool hasWheelY;
+ };
+ 
+-struct v1_GameInputMouseInfo /* v1, v2 */
++struct GameInputMouseInfo_v1 /* v1, v2, v3 */
+ {
+     GameInputMouseButtons supportedButtons;
+     uint32_t sampleRate;
+@@ -1043,7 +1233,25 @@ struct GameInputSensorsInfo /* v2 */
+     GameInputSensorsKind supportedSensors;
+ };
+ 
+-struct GameInputArcadeStickInfo
++struct GameInputArcadeStickInfo_v0 /* v0, v1, v2 */
++{
++    GameInputLabel menuButtonLabel;
++    GameInputLabel viewButtonLabel;
++    GameInputLabel stickUpLabel;
++    GameInputLabel stickDownLabel;
++    GameInputLabel stickLeftLabel;
++    GameInputLabel stickRightLabel;
++    GameInputLabel actionButton1Label;
++    GameInputLabel actionButton2Label;
++    GameInputLabel actionButton3Label;
++    GameInputLabel actionButton4Label;
++    GameInputLabel actionButton5Label;
++    GameInputLabel actionButton6Label;
++    GameInputLabel specialButton1Label;
++    GameInputLabel specialButton2Label;
++};
++
++struct GameInputArcadeStickInfo_v3
+ {
+     GameInputLabel menuButtonLabel;
+     GameInputLabel viewButtonLabel;
+@@ -1059,9 +1267,11 @@ struct GameInputArcadeStickInfo
+     GameInputLabel actionButton6Label;
+     GameInputLabel specialButton1Label;
+     GameInputLabel specialButton2Label;
++    uint32_t extraButtonCount;
++    uint32_t extraAxisCount;
+ };
+ 
+-struct GameInputFlightStickInfo
++struct GameInputFlightStickInfo_v0 /* v0, v1, v2 */
+ {
+     GameInputLabel menuButtonLabel;
+     GameInputLabel viewButtonLabel;
+@@ -1070,7 +1280,27 @@ struct GameInputFlightStickInfo
+     GameInputSwitchKind hatSwitchKind;
+ };
+ 
+-struct GameInputGamepadInfo
++struct GameInputFlightStickInfo_v3
++{
++    GameInputLabel menuButtonLabel;
++    GameInputLabel viewButtonLabel;
++    GameInputLabel firePrimaryButtonLabel;
++    GameInputLabel fireSecondaryButtonLabel;
++    GameInputLabel hatSwitchUpLabel;
++    GameInputLabel hatSwitchDownLabel;
++    GameInputLabel hatSwitchLeftLabel;
++    GameInputLabel hatSwitchRightLabel;
++    GameInputLabel aButtonLabel;
++    GameInputLabel bButtonLabel;
++    GameInputLabel xButtonLabel;
++    GameInputLabel yButtonLabel;
++    GameInputLabel leftShoulderButtonLabel;
++    GameInputLabel rightShoulderButtonLabel;
++    uint32_t extraButtonCount;
++    uint32_t extraAxisCount;
++};
++
++struct GameInputGamepadInfo_v0 /* v0, v1, v2 */
+ {
+     GameInputLabel menuButtonLabel;
+     GameInputLabel viewButtonLabel;
+@@ -1088,7 +1318,48 @@ struct GameInputGamepadInfo
+     GameInputLabel rightThumbstickButtonLabel;
+ };
+ 
+-struct GameInputRacingWheelInfo
++struct GameInputGamepadInfo_v3
++{
++    GameInputGamepadButtons supportedLayout;
++    GameInputLabel menuButtonLabel;
++    GameInputLabel viewButtonLabel;
++    GameInputLabel aButtonLabel;
++    GameInputLabel bButtonLabel;
++    GameInputLabel cButtonLabel;
++    GameInputLabel xButtonLabel;
++    GameInputLabel yButtonLabel;
++    GameInputLabel zButtonLabel;
++    GameInputLabel dpadUpLabel;
++    GameInputLabel dpadDownLabel;
++    GameInputLabel dpadLeftLabel;
++    GameInputLabel dpadRightLabel;
++    GameInputLabel leftShoulderButtonLabel;
++    GameInputLabel rightShoulderButtonLabel;
++    GameInputLabel leftThumbstickButtonLabel;
++    GameInputLabel rightThumbstickButtonLabel;
++    uint32_t extraButtonCount;
++    uint32_t extraAxisCount;
++};
++
++struct GameInputRacingWheelInfo_v0 /* v0, v1, v2 */
++{
++    GameInputLabel menuButtonLabel;
++    GameInputLabel viewButtonLabel;
++    GameInputLabel previousGearButtonLabel;
++    GameInputLabel nextGearButtonLabel;
++    GameInputLabel dpadUpLabel;
++    GameInputLabel dpadDownLabel;
++    GameInputLabel dpadLeftLabel;
++    GameInputLabel dpadRightLabel;
++    bool hasClutch;
++    bool hasHandbrake;
++    bool hasPatternShifter;
++    int32_t minPatternShifterGear;
++    int32_t maxPatternShifterGear;
++    float maxWheelAngle;
++};
++
++struct GameInputRacingWheelInfo_v3
+ {
+     GameInputLabel menuButtonLabel;
+     GameInputLabel viewButtonLabel;
+@@ -1098,15 +1369,23 @@ struct GameInputRacingWheelInfo
+     GameInputLabel dpadDownLabel;
+     GameInputLabel dpadLeftLabel;
+     GameInputLabel dpadRightLabel;
++    GameInputLabel aButtonLabel;
++    GameInputLabel bButtonLabel;
++    GameInputLabel xButtonLabel;
++    GameInputLabel yButtonLabel;
++    GameInputLabel leftThumbstickButtonLabel;
++    GameInputLabel rightThumbstickButtonLabel;
+     bool hasClutch;
+     bool hasHandbrake;
+     bool hasPatternShifter;
+     int32_t minPatternShifterGear;
+     int32_t maxPatternShifterGear;
+     float maxWheelAngle;
++    uint32_t extraButtonCount;
++    uint32_t extraAxisCount;
+ };
+ 
+-struct GameInputUiNavigationInfo
++struct GameInputUiNavigationInfo /* v0, v1, v2 */
+ {
+     GameInputLabel menuButtonLabel;
+     GameInputLabel viewButtonLabel;
+@@ -1131,7 +1410,7 @@ struct GameInputUiNavigationInfo
+     GameInputLabel guideButtonLabel;
+ };
+ 
+-struct v0_GameInputForceFeedbackMotorInfo
++struct GameInputForceFeedbackMotorInfo_v0
+ {
+     GameInputFeedbackAxes supportedAxes;
+     GameInputLocation location;
+@@ -1150,7 +1429,7 @@ struct v0_GameInputForceFeedbackMotorInfo
+     bool isInertiaEffectSupported;
+ };
+ 
+-struct v1_GameInputForceFeedbackMotorInfo /* v1, v2 */
++struct GameInputForceFeedbackMotorInfo_v1 /* v1, v2, v3 */
+ {
+     GameInputFeedbackAxes supportedAxes;
+     bool isConstantEffectSupported;
+@@ -1185,7 +1464,7 @@ struct GameInputHapticFeedbackMotorInfo /* v0 */
+     const GameInputHapticWaveformInfo *waveformInfo;
+ };
+ 
+-struct v0_GameInputDeviceInfo
++struct GameInputDeviceInfo_v0
+ {
+     uint32_t infoSize;
+     uint16_t vendorId;
+@@ -1214,22 +1493,22 @@ struct v0_GameInputDeviceInfo
+     uint32_t hapticFeedbackMotorCount;
+     uint32_t deviceStringCount;
+     uint32_t deviceDescriptorSize;
+-    const GameInputRawDeviceReportInfo *inputReportInfo;
+-    const GameInputRawDeviceReportInfo *outputReportInfo;
+-    const GameInputRawDeviceReportInfo *featureReportInfo;
+-    const v0_GameInputControllerAxisInfo *controllerAxisInfo;
+-    const v0_GameInputControllerButtonInfo *controllerButtonInfo;
+-    const v0_GameInputControllerSwitchInfo *controllerSwitchInfo;
+-    const v0_GameInputKeyboardInfo *keyboardInfo;
+-    const v0_GameInputMouseInfo *mouseInfo;
++    const GameInputRawDeviceReportInfo_v0 *inputReportInfo;
++    const GameInputRawDeviceReportInfo_v0 *outputReportInfo;
++    const GameInputRawDeviceReportInfo_v0 *featureReportInfo;
++    const GameInputControllerAxisInfo_v0 *controllerAxisInfo;
++    const GameInputControllerButtonInfo_v0 *controllerButtonInfo;
++    const GameInputControllerSwitchInfo_v0 *controllerSwitchInfo;
++    const GameInputKeyboardInfo_v0 *keyboardInfo;
++    const GameInputMouseInfo_v0 *mouseInfo;
+     const GameInputTouchSensorInfo *touchSensorInfo;
+     const GameInputMotionInfo *motionInfo;
+-    const GameInputArcadeStickInfo *arcadeStickInfo;
+-    const GameInputFlightStickInfo *flightStickInfo;
+-    const GameInputGamepadInfo *gamepadInfo;
+-    const GameInputRacingWheelInfo *racingWheelInfo;
++    const GameInputArcadeStickInfo_v0 *arcadeStickInfo;
++    const GameInputFlightStickInfo_v0 *flightStickInfo;
++    const GameInputGamepadInfo_v0 *gamepadInfo;
++    const GameInputRacingWheelInfo_v0 *racingWheelInfo;
+     const GameInputUiNavigationInfo *uiNavigationInfo;
+-    const v0_GameInputForceFeedbackMotorInfo *forceFeedbackMotorInfo;
++    const GameInputForceFeedbackMotorInfo_v0 *forceFeedbackMotorInfo;
+     const GameInputHapticFeedbackMotorInfo *hapticFeedbackMotorInfo;
+     const GameInputString *displayName;
+     const GameInputString *deviceStrings;
+@@ -1237,7 +1516,7 @@ struct v0_GameInputDeviceInfo
+     GameInputSystemButtons supportedSystemButtons;
+ };
+ 
+-struct v1_GameInputDeviceInfo
++struct GameInputDeviceInfo_v1
+ {
+     uint16_t vendorId;
+     uint16_t productId;
+@@ -1250,24 +1529,24 @@ struct v1_GameInputDeviceInfo
+     GameInputSystemButtons supportedSystemButtons;
+     const char *displayName;
+     const char *pnpPath;
+-    const v1_GameInputKeyboardInfo *keyboardInfo;
+-    const v1_GameInputMouseInfo *mouseInfo;
+-    const GameInputArcadeStickInfo *arcadeStickInfo;
+-    const GameInputFlightStickInfo *flightStickInfo;
+-    const GameInputGamepadInfo *gamepadInfo;
+-    const GameInputRacingWheelInfo *racingWheelInfo;
++    const GameInputKeyboardInfo_v1 *keyboardInfo;
++    const GameInputMouseInfo_v1 *mouseInfo;
++    const GameInputArcadeStickInfo_v1 *arcadeStickInfo;
++    const GameInputFlightStickInfo_v1 *flightStickInfo;
++    const GameInputGamepadInfo_v1 *gamepadInfo;
++    const GameInputRacingWheelInfo_v1 *racingWheelInfo;
+     const GameInputUiNavigationInfo *uiNavigationInfo;
+     uint32_t controllerAxisCount;
+-    const v1_GameInputControllerAxisInfo *controllerAxisInfo;
++    const GameInputControllerAxisInfo_v1 *controllerAxisInfo;
+     uint32_t controllerButtonCount;
+-    const v1_GameInputControllerButtonInfo *controllerButtonInfo;
++    const GameInputControllerButtonInfo_v1 *controllerButtonInfo;
+     uint32_t controllerSwitchCount;
+-    const v1_GameInputControllerSwitchInfo *controllerSwitchInfo;
++    const GameInputControllerSwitchInfo_v1 *controllerSwitchInfo;
+     uint32_t forceFeedbackMotorCount;
+-    const v1_GameInputForceFeedbackMotorInfo *forceFeedbackMotorInfo;
++    const GameInputForceFeedbackMotorInfo_v1 *forceFeedbackMotorInfo;
+ };
+ 
+-struct v2_GameInputDeviceInfo
++struct GameInputDeviceInfo_v2
+ {
+     uint16_t vendorId;
+     uint16_t productId;
+@@ -1284,22 +1563,55 @@ struct v2_GameInputDeviceInfo
+     GUID containerId;
+     const char *displayName;
+     const char *pnpPath;
+-    const v2_GameInputKeyboardInfo *keyboardInfo;
+-    const v2_GameInputMouseInfo *mouseInfo;
++    const GameInputKeyboardInfo_v2 *keyboardInfo;
++    const GameInputMouseInfo_v2 *mouseInfo;
+     const GameInputSensorsInfo *sensorsInfo;
+-    const GameInputArcadeStickInfo *arcadeStickInfo;
+-    const GameInputFlightStickInfo *flightStickInfo;
+-    const GameInputGamepadInfo *gamepadInfo;
+-    const GameInputRacingWheelInfo *racingWheelInfo;
++    const GameInputArcadeStickInfo_v2 *arcadeStickInfo;
++    const GameInputFlightStickInfo_v2 *flightStickInfo;
++    const GameInputGamepadInfo_v2 *gamepadInfo;
++    const GameInputRacingWheelInfo_v2 *racingWheelInfo;
+     const GameInputUiNavigationInfo *uiNavigationInfo;
+     uint32_t controllerAxisCount;
+-    const v2_GameInputControllerAxisInfo *controllerAxisInfo;
++    const GameInputControllerAxisInfo_v2 *controllerAxisInfo;
+     uint32_t controllerButtonCount;
+-    const v2_GameInputControllerButtonInfo *controllerButtonInfo;
++    const GameInputControllerButtonInfo_v2 *controllerButtonInfo;
+     uint32_t controllerSwitchCount;
+-    const v2_GameInputControllerSwitchInfo *controllerSwitchInfo;
++    const GameInputControllerSwitchInfo_v2 *controllerSwitchInfo;
+     uint32_t forceFeedbackMotorCount;
+-    const v2_GameInputForceFeedbackMotorInfo *forceFeedbackMotorInfo;
++    const GameInputForceFeedbackMotorInfo_v2 *forceFeedbackMotorInfo;
++};
++
++struct GameInputDeviceInfo_v3
++{
++    uint16_t vendorId;
++    uint16_t productId;
++    uint16_t revisionNumber;
++    GameInputUsage usage;
++    GameInputVersion hardwareVersion;
++    GameInputVersion firmwareVersion;
++    APP_LOCAL_DEVICE_ID deviceId;
++    APP_LOCAL_DEVICE_ID deviceRootId;
++    GameInputDeviceFamily deviceFamily;
++    GameInputKind supportedInput;
++    GameInputRumbleMotors supportedRumbleMotors;
++    GameInputSystemButtons supportedSystemButtons;
++    GUID containerId;
++    const char *displayName;
++    const char *pnpPath;
++    const GameInputKeyboardInfo_v3 *keyboardInfo;
++    const GameInputMouseInfo_v3 *mouseInfo;
++    const GameInputSensorsInfo *sensorsInfo;
++    const GameInputControllerInfo *controllerInfo;
++    const GameInputArcadeStickInfo_v3 *arcadeStickInfo;
++    const GameInputFlightStickInfo_v3 *flightStickInfo;
++    const GameInputGamepadInfo_v3 *gamepadInfo;
++    const GameInputRacingWheelInfo_v3 *racingWheelInfo;
++    uint32_t forceFeedbackMotorCount;
++    const GameInputForceFeedbackMotorInfo_v3 *forceFeedbackMotorInfo;
++    uint32_t inputReportCount;
++    const GameInputRawDeviceReportInfo_v3 *inputReportInfo;
++    uint32_t outputReportCount;
++    const GameInputRawDeviceReportInfo_v3 *outputReportInfo;
+ };
+ 
+ struct GameInputHapticInfo /* v2 */
+@@ -1401,76 +1713,115 @@ struct GameInputRumbleParams
+     float rightTrigger;
+ };
+ 
++struct GameInputAxisMapping /* v3 */
++{
++    GameInputElementKind controllerElementKind;
++    uint32_t controllerIndex;
++    bool isInverted;
++    bool fromTwoButtons;
++    uint32_t buttonMinIndexValue;
++    GameInputSwitchPosition referenceDirection;
++};
++
++struct GameInputButtonMapping /* v3 */
++{
++    GameInputElementKind controllerElementKind;
++    uint32_t controllerIndex;
++    bool isInverted;
++    GameInputSwitchPosition switchPosition;
++};
++
+ [object, local, uuid(11be2a7e-4254-445a-9c09-ffc40f006918)]
+-interface v0_IGameInput : IUnknown
++interface IGameInput_v0 : IUnknown
+ {
+     uint64_t GetCurrentTimestamp();
+-    HRESULT GetCurrentReading( GameInputKind kind, v0_IGameInputDevice *device, [out] v0_IGameInputReading **reading );
+-    HRESULT GetNextReading( v0_IGameInputReading *reference, GameInputKind kind, v0_IGameInputDevice *device, [out] v0_IGameInputReading **reading );
+-    HRESULT GetPreviousReading( v0_IGameInputReading *reference, GameInputKind kind, v0_IGameInputDevice *device, [out] v0_IGameInputReading **reading );
+-    HRESULT GetTemporalReading( uint64_t timestamp, v0_IGameInputDevice *device, [out] v0_IGameInputReading **reading );
+-    HRESULT RegisterReadingCallback( v0_IGameInputDevice *device, GameInputKind kind, float threshold, void *context, v0_GameInputReadingCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterDeviceCallback( v0_IGameInputDevice *device, GameInputKind kind, GameInputDeviceStatus filter, GameInputEnumerationKind enum_kind, void *context, v0_GameInputDeviceCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterSystemButtonCallback( v0_IGameInputDevice *device, GameInputSystemButtons filter, void *context, v0_GameInputSystemButtonCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterKeyboardLayoutCallback( v0_IGameInputDevice *device, void *context, v0_GameInputKeyboardLayoutCallback callback, [out] GameInputCallbackToken *token );
++    HRESULT GetCurrentReading( GameInputKind kind, IGameInputDevice_v0 *device, [out] IGameInputReading_v0 **reading );
++    HRESULT GetNextReading( IGameInputReading_v0 *reference, GameInputKind kind, IGameInputDevice_v0 *device, [out] IGameInputReading_v0 **reading );
++    HRESULT GetPreviousReading( IGameInputReading_v0 *reference, GameInputKind kind, IGameInputDevice_v0 *device, [out] IGameInputReading_v0 **reading );
++    HRESULT GetTemporalReading( uint64_t timestamp, IGameInputDevice_v0 *device, [out] IGameInputReading_v0 **reading );
++    HRESULT RegisterReadingCallback( IGameInputDevice_v0 *device, GameInputKind kind, float threshold, void *context, GameInputReadingCallback_v0 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterDeviceCallback( IGameInputDevice_v0 *device, GameInputKind kind, GameInputDeviceStatus filter, GameInputEnumerationKind enum_kind, void *context, GameInputDeviceCallback_v0 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterSystemButtonCallback( IGameInputDevice_v0 *device, GameInputSystemButtons filter, void *context, GameInputSystemButtonCallback_v0 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterKeyboardLayoutCallback( IGameInputDevice_v0 *device, void *context, GameInputKeyboardLayoutCallback_v0 callback, [out] GameInputCallbackToken *token );
+     void StopCallback( GameInputCallbackToken token );
+     bool UnregisterCallback( GameInputCallbackToken token, uint64_t timeout_ms );
+     HRESULT CreateDispatcher( [out] IGameInputDispatcher **dispatcher );
+-    HRESULT CreateAggregateDevice( GameInputKind kind, [out] v0_IGameInputDevice **device );
+-    HRESULT FindDeviceFromId( const APP_LOCAL_DEVICE_ID *value, [out] v0_IGameInputDevice **device );
+-    HRESULT FindDeviceFromObject( IUnknown *value, [out] v0_IGameInputDevice **device );
+-    HRESULT FindDeviceFromPlatformHandle( HANDLE value, [out] v0_IGameInputDevice **device );
+-    HRESULT FindDeviceFromPlatformString( const WCHAR *value, [out] v0_IGameInputDevice **device );
++    HRESULT CreateAggregateDevice( GameInputKind kind, [out] IGameInputDevice_v0 **device );
++    HRESULT FindDeviceFromId( const APP_LOCAL_DEVICE_ID *value, [out] IGameInputDevice_v0 **device );
++    HRESULT FindDeviceFromObject( IUnknown *value, [out] IGameInputDevice_v0 **device );
++    HRESULT FindDeviceFromPlatformHandle( HANDLE value, [out] IGameInputDevice_v0 **device );
++    HRESULT FindDeviceFromPlatformString( const WCHAR *value, [out] IGameInputDevice_v0 **device );
+     HRESULT EnableOemDeviceSupport( uint16_t vid, uint16_t pid, uint8_t iface, uint8_t collection );
+     void SetFocusPolicy( GameInputFocusPolicy policy );
+ };
+ 
+ [object, local, uuid(40ffb7e4-6150-407a-b439-132badc08d2d)]
+-interface v1_IGameInput : IUnknown
++interface IGameInput_v1 : IUnknown
+ {
+     uint64_t GetCurrentTimestamp();
+-    HRESULT GetCurrentReading( GameInputKind kind, v1_IGameInputDevice *device, [out] v1_IGameInputReading **reading );
+-    HRESULT GetNextReading( v1_IGameInputReading *reference, GameInputKind kind, v1_IGameInputDevice *device, [out] v1_IGameInputReading **reading );
+-    HRESULT GetPreviousReading( v1_IGameInputReading *reference, GameInputKind kind, v1_IGameInputDevice *device, [out] v1_IGameInputReading **reading );
+-    HRESULT RegisterReadingCallback( v1_IGameInputDevice *device, GameInputKind kind, void *context, v1_GameInputReadingCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterDeviceCallback( v1_IGameInputDevice *device, GameInputKind kind, GameInputDeviceStatus filter, GameInputEnumerationKind enum_kind, void *context, v1_GameInputDeviceCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterSystemButtonCallback( v1_IGameInputDevice *device, GameInputSystemButtons filter, void *context, v1_GameInputSystemButtonCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterKeyboardLayoutCallback( v1_IGameInputDevice *device, void *context, v1_GameInputKeyboardLayoutCallback callback, [out] GameInputCallbackToken *token );
++    HRESULT GetCurrentReading( GameInputKind kind, IGameInputDevice_v1 *device, [out] IGameInputReading_v1 **reading );
++    HRESULT GetNextReading( IGameInputReading_v1 *reference, GameInputKind kind, IGameInputDevice_v1 *device, [out] IGameInputReading_v1 **reading );
++    HRESULT GetPreviousReading( IGameInputReading_v1 *reference, GameInputKind kind, IGameInputDevice_v1 *device, [out] IGameInputReading_v1 **reading );
++    HRESULT RegisterReadingCallback( IGameInputDevice_v1 *device, GameInputKind kind, void *context, GameInputReadingCallback_v1 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterDeviceCallback( IGameInputDevice_v1 *device, GameInputKind kind, GameInputDeviceStatus filter, GameInputEnumerationKind enum_kind, void *context, GameInputDeviceCallback_v1 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterSystemButtonCallback( IGameInputDevice_v1 *device, GameInputSystemButtons filter, void *context, GameInputSystemButtonCallback_v1 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterKeyboardLayoutCallback( IGameInputDevice_v1 *device, void *context, GameInputKeyboardLayoutCallback_v1 callback, [out] GameInputCallbackToken *token );
+     void StopCallback( GameInputCallbackToken token );
+     bool UnregisterCallback( GameInputCallbackToken token );
+     HRESULT CreateDispatcher( [out] IGameInputDispatcher **dispatcher );
+-    HRESULT FindDeviceFromId( const APP_LOCAL_DEVICE_ID *value, [out] v1_IGameInputDevice **device );
+-    HRESULT FindDeviceFromPlatformString( const WCHAR *value, [out] v1_IGameInputDevice **device );
++    HRESULT FindDeviceFromId( const APP_LOCAL_DEVICE_ID *value, [out] IGameInputDevice_v1 **device );
++    HRESULT FindDeviceFromPlatformString( const WCHAR *value, [out] IGameInputDevice_v1 **device );
+     void SetFocusPolicy( GameInputFocusPolicy policy );
+ };
+ 
+ [object, local, uuid(bbaa66d2-837a-40f7-a303-917d500955f4)]
+-interface v2_IGameInput : IUnknown
++interface IGameInput_v2 : IUnknown
++{
++    uint64_t GetCurrentTimestamp();
++    HRESULT GetCurrentReading( GameInputKind kind, IGameInputDevice_v2 *device, [out] IGameInputReading_v2 **reading );
++    HRESULT GetNextReading( IGameInputReading_v2 *reference, GameInputKind kind, IGameInputDevice_v2 *device, [out] IGameInputReading_v2 **reading );
++    HRESULT GetPreviousReading( IGameInputReading_v2 *reference, GameInputKind kind, IGameInputDevice_v2 *device, [out] IGameInputReading_v2 **reading );
++    HRESULT RegisterReadingCallback( IGameInputDevice_v2 *device, GameInputKind kind, void *context, GameInputReadingCallback_v2 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterDeviceCallback( IGameInputDevice_v2 *device, GameInputKind kind, GameInputDeviceStatus filter, GameInputEnumerationKind enum_kind, void *context, GameInputDeviceCallback_v2 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterSystemButtonCallback( IGameInputDevice_v2 *device, GameInputSystemButtons filter, void *context, GameInputSystemButtonCallback_v2 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterKeyboardLayoutCallback( IGameInputDevice_v2 *device, void *context, GameInputKeyboardLayoutCallback_v2 callback, [out] GameInputCallbackToken *token );
++    void StopCallback( GameInputCallbackToken token );
++    bool UnregisterCallback( GameInputCallbackToken token );
++    HRESULT CreateDispatcher( [out] IGameInputDispatcher **dispatcher );
++    HRESULT FindDeviceFromId( const APP_LOCAL_DEVICE_ID *value, [out] IGameInputDevice_v2 **device );
++    HRESULT FindDeviceFromPlatformString( const WCHAR *value, [out] IGameInputDevice_v2 **device );
++    void SetFocusPolicy( GameInputFocusPolicy policy );
++};
++
++[object, local, uuid(20efc1c7-5d9a-43ba-b26f-b807fa48609c)]
++interface IGameInput_v3 : IUnknown
+ {
+     uint64_t GetCurrentTimestamp();
+-    HRESULT GetCurrentReading( GameInputKind kind, v2_IGameInputDevice *device, [out] v2_IGameInputReading **reading );
+-    HRESULT GetNextReading( v2_IGameInputReading *reference, GameInputKind kind, v2_IGameInputDevice *device, [out] v2_IGameInputReading **reading );
+-    HRESULT GetPreviousReading( v2_IGameInputReading *reference, GameInputKind kind, v2_IGameInputDevice *device, [out] v2_IGameInputReading **reading );
+-    HRESULT RegisterReadingCallback( v2_IGameInputDevice *device, GameInputKind kind, void *context, v2_GameInputReadingCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterDeviceCallback( v2_IGameInputDevice *device, GameInputKind kind, GameInputDeviceStatus filter, GameInputEnumerationKind enum_kind, void *context, v2_GameInputDeviceCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterSystemButtonCallback( v2_IGameInputDevice *device, GameInputSystemButtons filter, void *context, v2_GameInputSystemButtonCallback callback, [out] GameInputCallbackToken *token );
+-    HRESULT RegisterKeyboardLayoutCallback( v2_IGameInputDevice *device, void *context, v2_GameInputKeyboardLayoutCallback callback, [out] GameInputCallbackToken *token );
++    HRESULT GetCurrentReading( GameInputKind kind, IGameInputDevice_v3 *device, [out] IGameInputReading_v3 **reading );
++    HRESULT GetNextReading( IGameInputReading_v3 *reference, GameInputKind kind, IGameInputDevice_v3 *device, [out] IGameInputReading_v3 **reading );
++    HRESULT GetPreviousReading( IGameInputReading_v3 *reference, GameInputKind kind, IGameInputDevice_v3 *device, [out] IGameInputReading_v3 **reading );
++    HRESULT RegisterReadingCallback( IGameInputDevice_v3 *device, GameInputKind kind, void *context, GameInputReadingCallback_v3 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterDeviceCallback( IGameInputDevice_v3 *device, GameInputKind kind, GameInputDeviceStatus filter, GameInputEnumerationKind enum_kind, void *context, GameInputDeviceCallback_v3 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterSystemButtonCallback( IGameInputDevice_v3 *device, GameInputSystemButtons filter, void *context, GameInputSystemButtonCallback_v3 callback, [out] GameInputCallbackToken *token );
++    HRESULT RegisterKeyboardLayoutCallback( IGameInputDevice_v3 *device, void *context, GameInputKeyboardLayoutCallback_v3 callback, [out] GameInputCallbackToken *token );
+     void StopCallback( GameInputCallbackToken token );
+     bool UnregisterCallback( GameInputCallbackToken token );
+     HRESULT CreateDispatcher( [out] IGameInputDispatcher **dispatcher );
+-    HRESULT FindDeviceFromId( const APP_LOCAL_DEVICE_ID *value, [out] v2_IGameInputDevice **device );
+-    HRESULT FindDeviceFromPlatformString( const WCHAR *value, [out] v2_IGameInputDevice **device );
++    HRESULT FindDeviceFromId( const APP_LOCAL_DEVICE_ID *value, [out] IGameInputDevice_v3 **device );
++    HRESULT FindDeviceFromPlatformString( const WCHAR *value, [out] IGameInputDevice_v3 **device );
+     void SetFocusPolicy( GameInputFocusPolicy policy );
++    HRESULT CreateAggregateDevice( GameInputKind kind, APP_LOCAL_DEVICE_ID *id );
++    HRESULT DisableAggregateDevice( const APP_LOCAL_DEVICE_ID *id );
+ };
+ 
+ [object, local, uuid(2156947a-e1fa-4de0-a30b-d812931dbd8d)]
+-interface v0_IGameInputReading : IUnknown
++interface IGameInputReading_v0 : IUnknown
+ {
+     GameInputKind GetInputKind();
+     uint64_t GetSequenceNumber( GameInputKind kind );
+     uint64_t GetTimestamp();
+-    void GetDevice( [out] v0_IGameInputDevice **device );
+-    bool GetRawReport( [out] IGameInputRawDeviceReport **report );
++    void GetDevice( [out] IGameInputDevice_v0 **device );
++    bool GetRawReport( [out] IGameInputRawDeviceReport_v0 **report );
+     uint32_t GetControllerAxisCount();
+     uint32_t GetControllerAxisState( uint32_t count, [out, size_is(count)] float *state );
+     uint32_t GetControllerButtonCount();
+@@ -1479,7 +1830,7 @@ interface v0_IGameInputReading : IUnknown
+     uint32_t GetControllerSwitchState( uint32_t count, [out, size_is(count)] GameInputSwitchPosition *state );
+     uint32_t GetKeyCount();
+     uint32_t GetKeyState( uint32_t count, [out, size_is(count)] GameInputKeyState *state );
+-    bool GetMouseState( [out] v0_GameInputMouseState *state );
++    bool GetMouseState( [out] GameInputMouseState_v0 *state );
+     uint32_t GetTouchCount();
+     uint32_t GetTouchState( uint32_t count, [out, size_is(count)] GameInputTouchState *state );
+     bool GetMotionState( [out] GameInputMotionState *state );
+@@ -1491,11 +1842,11 @@ interface v0_IGameInputReading : IUnknown
+ };
+ 
+ [object, local, uuid(86318e60-0b3c-40d6-befa-c62f2d952724)]
+-interface v1_IGameInputReading : IUnknown
++interface IGameInputReading_v1 : IUnknown
+ {
+     GameInputKind GetInputKind();
+     uint64_t GetTimestamp();
+-    void GetDevice( [out] v1_IGameInputDevice **device );
++    void GetDevice( [out] IGameInputDevice_v1 **device );
+     uint32_t GetControllerAxisCount();
+     uint32_t GetControllerAxisState( uint32_t count, [out, size_is(count)] float *state );
+     uint32_t GetControllerButtonCount();
+@@ -1504,7 +1855,7 @@ interface v1_IGameInputReading : IUnknown
+     uint32_t GetControllerSwitchState( uint32_t count, [out, size_is(count)] GameInputSwitchPosition *state );
+     uint32_t GetKeyCount();
+     uint32_t GetKeyState( uint32_t count, [out, size_is(count)] GameInputKeyState *state );
+-    bool GetMouseState( [out] v1_GameInputMouseState *state );
++    bool GetMouseState( [out] GameInputMouseState_v1 *state );
+     bool GetArcadeStickState( [out] GameInputArcadeStickState *state );
+     bool GetFlightStickState( [out] GameInputFlightStickState *state );
+     bool GetGamepadState( [out] GameInputGamepadState *state );
+@@ -1513,11 +1864,11 @@ interface v1_IGameInputReading : IUnknown
+ };
+ 
+ [object, local, uuid(65f06483-db76-40b7-b745-f591fae55fc9)]
+-interface v2_IGameInputReading : IUnknown
++interface IGameInputReading_v2 : IUnknown
+ {
+     GameInputKind GetInputKind();
+     uint64_t GetTimestamp();
+-    void GetDevice( [out] v2_IGameInputDevice **device );
++    void GetDevice( [out] IGameInputDevice_v2 **device );
+     uint32_t GetControllerAxisCount();
+     uint32_t GetControllerAxisState( uint32_t count, [out, size_is(count)] float *state );
+     uint32_t GetControllerButtonCount();
+@@ -1526,7 +1877,7 @@ interface v2_IGameInputReading : IUnknown
+     uint32_t GetControllerSwitchState( uint32_t count, [out, size_is(count)] GameInputSwitchPosition *state );
+     uint32_t GetKeyCount();
+     uint32_t GetKeyState( uint32_t count, [out, size_is(count)] GameInputKeyState *state );
+-    bool GetMouseState( [out] v2_GameInputMouseState *state );
++    bool GetMouseState( [out] GameInputMouseState_v2 *state );
+     bool GetSensorsState( [out] GameInputSensorsState *state );
+     bool GetArcadeStickState( [out] GameInputArcadeStickState *state );
+     bool GetFlightStickState( [out] GameInputFlightStickState *state );
+@@ -1535,13 +1886,36 @@ interface v2_IGameInputReading : IUnknown
+     bool GetUiNavigationState( [out] GameInputUiNavigationState *state );
+ };
+ 
++[object, local, uuid(c81c4cde-ed1a-4631-a30f-c556a6241a1f)]
++interface IGameInputReading_v3 : IUnknown
++{
++    GameInputKind GetInputKind();
++    uint64_t GetTimestamp();
++    void GetDevice( [out] IGameInputDevice_v3 **device );
++    uint32_t GetControllerAxisCount();
++    uint32_t GetControllerAxisState( uint32_t count, [out, size_is(count)] float *state );
++    uint32_t GetControllerButtonCount();
++    uint32_t GetControllerButtonState( uint32_t count, [out, size_is(count)] bool *state );
++    uint32_t GetControllerSwitchCount();
++    uint32_t GetControllerSwitchState( uint32_t count, [out, size_is(count)] GameInputSwitchPosition *state );
++    uint32_t GetKeyCount();
++    uint32_t GetKeyState( uint32_t count, [out, size_is(count)] GameInputKeyState *state );
++    bool GetMouseState( [out] GameInputMouseState_v3 *state );
++    bool GetSensorsState( [out] GameInputSensorsState *state );
++    bool GetArcadeStickState( [out] GameInputArcadeStickState *state );
++    bool GetFlightStickState( [out] GameInputFlightStickState *state );
++    bool GetGamepadState( [out] GameInputGamepadState *state );
++    bool GetRacingWheelState( [out] GameInputRacingWheelState *state );
++    bool GetRawReport( [out] IGameInputRawDeviceReport_v3 **report );
++};
++
+ [object, local, uuid(31dd86fb-4c1b-408a-868f-439b3cd47125)]
+-interface v0_IGameInputDevice : IUnknown
++interface IGameInputDevice_v0 : IUnknown
+ {
+-    const v0_GameInputDeviceInfo *GetDeviceInfo();
++    const GameInputDeviceInfo_v0 *GetDeviceInfo();
+     GameInputDeviceStatus GetDeviceStatus();
+     void GetBatteryState( [out] GameInputBatteryState *state );
+-    HRESULT CreateForceFeedbackEffect( uint32_t motor, const GameInputForceFeedbackParams *params, [out] v0_IGameInputForceFeedbackEffect **effect );
++    HRESULT CreateForceFeedbackEffect( uint32_t motor, const GameInputForceFeedbackParams *params, [out] IGameInputForceFeedbackEffect_v0 **effect );
+     bool IsForceFeedbackMotorPoweredOn( uint32_t motor );
+     void SetForceFeedbackMotorGain( uint32_t motor, float gain );
+     HRESULT SetHapticMotorState( uint32_t motor, const GameInputHapticFeedbackParams *params );
+@@ -1549,38 +1923,58 @@ interface v0_IGameInputDevice : IUnknown
+     void SetInputSynchronizationState( bool enabled );
+     void SendInputSynchronizationHint();
+     void PowerOff();
+-    HRESULT CreateRawDeviceReport( uint32_t id, GameInputRawDeviceReportKind kind, [out] IGameInputRawDeviceReport **report );
+-    HRESULT GetRawDeviceFeature( uint32_t id, [out] IGameInputRawDeviceReport **report );
+-    HRESULT SetRawDeviceFeature( IGameInputRawDeviceReport *report );
+-    HRESULT SendRawDeviceOutput( IGameInputRawDeviceReport *report );
+-    HRESULT SendRawDeviceOutputWithResponse( IGameInputRawDeviceReport *request, [out] IGameInputRawDeviceReport **reply );
++    HRESULT CreateRawDeviceReport( uint32_t id, GameInputRawDeviceReportKind kind, [out] IGameInputRawDeviceReport_v0 **report );
++    HRESULT GetRawDeviceFeature( uint32_t id, [out] IGameInputRawDeviceReport_v0 **report );
++    HRESULT SetRawDeviceFeature( IGameInputRawDeviceReport_v0 *report );
++    HRESULT SendRawDeviceOutput( IGameInputRawDeviceReport_v0 *report );
++    HRESULT SendRawDeviceOutputWithResponse( IGameInputRawDeviceReport_v0 *request, [out] IGameInputRawDeviceReport_v0 **reply );
+     HRESULT ExecuteRawDeviceIoControl( uint32_t code, size_t in_size, [size_is(in_size)] const void *input, size_t out_size, [out, size_is(out_size)] void *output, [out] size_t *size );
+     bool AcquireExclusiveRawDeviceAccess( uint64_t timeout_ms );
+     void ReleaseExclusiveRawDeviceAccess();
+ };
+ 
+ [object, local, uuid(b169652a-4a32-40d7-9fa9-905997952516)]
+-interface v1_IGameInputDevice : IUnknown
++interface IGameInputDevice_v1 : IUnknown
+ {
+-    HRESULT GetDeviceInfo( [out] const v1_GameInputDeviceInfo **info );
++    HRESULT GetDeviceInfo( [out] const GameInputDeviceInfo_v1 **info );
+     GameInputDeviceStatus GetDeviceStatus();
+-    HRESULT CreateForceFeedbackEffect( uint32_t motor, const GameInputForceFeedbackParams *params, [out] v0_IGameInputForceFeedbackEffect **effect );
++    HRESULT CreateForceFeedbackEffect( uint32_t motor, const GameInputForceFeedbackParams *params, [out] IGameInputForceFeedbackEffect_v0 **effect );
+     bool IsForceFeedbackMotorPoweredOn( uint32_t motor );
+     void SetForceFeedbackMotorGain( uint32_t motor, float gain );
+     void SetRumbleState( const GameInputRumbleParams *params );
+ };
+ 
+ [object, local, uuid(39a0c9f2-f055-4089-96e7-25b2756d3077)]
+-interface v2_IGameInputDevice : IUnknown
++interface IGameInputDevice_v2 : IUnknown
++{
++    HRESULT GetDeviceInfo( [out] const GameInputDeviceInfo_v2 **info );
++    HRESULT GetHapticInfo( [out] GameInputHapticInfo *info );
++    GameInputDeviceStatus GetDeviceStatus();
++    HRESULT CreateForceFeedbackEffect( uint32_t motor, const GameInputForceFeedbackParams *params, [out] IGameInputForceFeedbackEffect_v2 **effect );
++    bool IsForceFeedbackMotorPoweredOn( uint32_t motor );
++    void SetForceFeedbackMotorGain( uint32_t motor, float gain );
++    void SetRumbleState( const GameInputRumbleParams *params );
++    HRESULT DirectInputEscape( uint32_t command, [size_is(in_size)] const void *input, uint32_t in_size, [out, size_is(out_size)] void *output, uint32_t out_size, [out] uint32_t *size );
++};
++
++[object, local, uuid(63e2f38b-a399-4275-8ae7-d4c6e524d12a)]
++interface IGameInputDevice_v3 : IUnknown
+ {
+-    HRESULT GetDeviceInfo( [out] const v2_GameInputDeviceInfo **info );
++    HRESULT GetDeviceInfo( [out] const GameInputDeviceInfo_v3 **info );
+     HRESULT GetHapticInfo( [out] GameInputHapticInfo *info );
+     GameInputDeviceStatus GetDeviceStatus();
+-    HRESULT CreateForceFeedbackEffect( uint32_t motor, const GameInputForceFeedbackParams *params, [out] v2_IGameInputForceFeedbackEffect **effect );
++    HRESULT CreateForceFeedbackEffect( uint32_t motor, const GameInputForceFeedbackParams *params, [out] IGameInputForceFeedbackEffect_v3 **effect );
+     bool IsForceFeedbackMotorPoweredOn( uint32_t motor );
+     void SetForceFeedbackMotorGain( uint32_t motor, float gain );
+     void SetRumbleState( const GameInputRumbleParams *params );
+     HRESULT DirectInputEscape( uint32_t command, [size_is(in_size)] const void *input, uint32_t in_size, [out, size_is(out_size)] void *output, uint32_t out_size, [out] uint32_t *size );
++    HRESULT CreateInputMapper( [out] IGameInputMapper **mapper );
++    HRESULT GetExtraAxisCount( GameInputKind kind, [out] uint32_t *count );
++    HRESULT GetExtraButtonCount( GameInputKind kind, [out] uint32_t *count );
++    HRESULT GetExtraAxisIndexes( GameInputKind kind, uint32_t count, [out, size_is(count)] uint8_t *indexes );
++    HRESULT GetExtraButtonIndexes( GameInputKind kind, uint32_t count, [out, size_is(count)] uint8_t *indexes );
++    HRESULT CreateRawDeviceReport( uint32_t id, GameInputRawDeviceReportKind kind, [out] IGameInputRawDeviceReport_v3 **report );
++    HRESULT SendRawDeviceOutput( IGameInputRawDeviceReport_v3 *report );
+ };
+ 
+ [object, local, uuid(415eed2e-98cb-42c2-8f28-b94601074e31)]
+@@ -1591,9 +1985,9 @@ interface IGameInputDispatcher : IUnknown
+ };
+ 
+ [object, local, uuid(51bda05e-f742-45d9-b085-9444ae48381d)]
+-interface v0_IGameInputForceFeedbackEffect /* v0, v1 */ : IUnknown
++interface IGameInputForceFeedbackEffect_v0 /* v0, v1 */ : IUnknown
+ {
+-    void GetDevice( [out] IUnknown /* v0_IGameInputDevice / v1_IGameInputDevice */ **device );
++    void GetDevice( [out] IUnknown /* IGameInputDevice_v0 / IGameInputDevice_v1 */ **device );
+     uint32_t GetMotorIndex();
+     float GetGain();
+     void SetGain( float gain );
+@@ -1604,9 +1998,9 @@ interface v0_IGameInputForceFeedbackEffect /* v0, v1 */ : IUnknown
+ };
+ 
+ [object, local, uuid(ff61096a-3373-4093-a1df-6d31846b3511)]
+-interface v2_IGameInputForceFeedbackEffect : IUnknown
++interface IGameInputForceFeedbackEffect_v2 : IUnknown
+ {
+-    void GetDevice( [out] v2_IGameInputDevice *device );
++    void GetDevice( [out] IGameInputDevice_v2 *device );
+     uint32_t GetMotorIndex();
+     float GetGain();
+     void SetGain( float gain );
+@@ -1617,10 +2011,10 @@ interface v2_IGameInputForceFeedbackEffect : IUnknown
+ };
+ 
+ [object, local, uuid(61f08cf1-1ffc-40ca-a2b8-e1ab8bc5b6dc)]
+-interface IGameInputRawDeviceReport /* v0 */ : IUnknown
++interface IGameInputRawDeviceReport_v0 /* v0 */ : IUnknown
+ {
+-    void GetDevice( [out] v0_IGameInputDevice **device );
+-    const GameInputRawDeviceReportInfo *GetReportInfo();
++    void GetDevice( [out] IGameInputDevice_v0 **device );
++    const GameInputRawDeviceReportInfo_v0 *GetReportInfo();
+     size_t GetRawDataSize();
+     size_t GetRawData( size_t size, [out, size_is(size)] void *buffer );
+     bool SetRawData( size_t size, [size_is(size)] const void *buffer );
+@@ -1630,6 +2024,28 @@ interface IGameInputRawDeviceReport /* v0 */ : IUnknown
+     bool ResetAllItems();
+ };
+ 
++[object, local, uuid(05a42d89-2cb6-45a3-874d-e635723587ab)]
++interface IGameInputRawDeviceReport_v3 /* v3 */ : IUnknown
++{
++    void GetDevice( [out] IGameInputDevice_v3 **device );
++    void GetReportInfo( [out] GameInputRawDeviceReportInfo_v3 *info );
++    size_t GetRawDataSize();
++    size_t GetRawData( size_t size, [out, size_is(size)] void *buffer );
++    bool SetRawData( size_t size, [size_is(size)] const void *buffer );
++};
++
++[object, local, uuid(3c600700-f16c-49ce-9be6-6a2ef752ed5e)]
++interface IGameInputMapper /* v3 */ : IUnknown
++{
++    bool GetArcadeStickButtonMappingInfo( GameInputArcadeStickButtons button, [out] GameInputButtonMapping *mapping );
++    bool GetFlightStickAxisMappingInfo( GameInputFlightStickAxes axis, [out] GameInputAxisMapping *mapping );
++    bool GetFlightStickButtonMappingInfo( GameInputFlightStickButtons button, [out] GameInputButtonMapping *mapping );
++    bool GetGamepadAxisMappingInfo( GameInputGamepadAxes axis, [out] GameInputAxisMapping *mapping );
++    bool GetGamepadButtonMappingInfo( GameInputGamepadButtons button, [out] GameInputButtonMapping *mapping );
++    bool GetRacingWheelAxisMappingInfo( GameInputRacingWheelAxes axis, [out] GameInputAxisMapping *mapping );
++    bool GetRacingWheelButtonMappingInfo( GameInputRacingWheelButtons button, [out] GameInputButtonMapping *mapping );
++};
++
+ const LONG FACILITY_GAMEINPUT = 906; /* v0 */
+ const LONG GAMEINPUT_FACILITY = 906; /* v1, v2 */
+ 
+@@ -1644,9 +2060,12 @@ const HRESULT GAMEINPUT_E_OBJECT_NO_LONGER_EXISTS = 0x838a0008; /* v1, v2 */
+ const HRESULT GAMEINPUT_E_CALLBACK_NOT_FOUND = 0x838a0009; /* v1, v2 */
+ const HRESULT GAMEINPUT_E_HAPTIC_INFO_NOT_FOUND = 0x838a000a; /* v2 */
+ const HRESULT GAMEINPUT_E_AGGREGATE_OPERATION_NOT_SUPPORTED = 0x838a000b; /* v2 */
++const HRESULT GAMEINPUT_E_INPUT_KIND_NOT_PRESENT = 0x838a000c; /* v3 */
++
++HRESULT __stdcall GameInputInitialize( REFIID iid, void **out );
+ 
+ cpp_quote("#ifdef __WINESRC__")
+-cpp_quote("STDAPI GameInputCreate( v0_IGameInput **out );")
++cpp_quote("STDAPI GameInputCreate( IGameInput_v0 **out );")
+ cpp_quote("#else")
+ cpp_quote("struct GameInputLegacy;")
+ cpp_quote("STDAPI GameInputCreate( struct GameInputLegacy **out );")

@@ -1,0 +1,3955 @@
+From d1f52f0e465330d66428d43db4353fb9a1385281 Mon Sep 17 00:00:00 2001
+From: x <x@x>
+Date: Sat, 24 Oct 2026 19:12:25 +0300
+Subject: [PATCH 01/79] highball
+
+---
+ dlls/advapi32/advapi.c             |  20 --
+ dlls/advapi32/cred.c               |   5 +-
+ dlls/kernel32/kernel32.spec        |   2 +
+ dlls/kernelbase/kernelbase.spec    |   6 +-
+ dlls/kernelbase/main.c             |   6 +
+ dlls/kernelbase/process.c          |  43 +++
+ dlls/kernelbase/thread.c           |  28 +-
+ dlls/kernelbase/version.c          | 236 ++++++++++++++-
+ dlls/mfreadwrite/reader.c          | 143 ---------
+ dlls/mmdevapi/spatialaudio.c       |  57 ++--
+ dlls/ntdll/error.c                 |  14 +-
+ dlls/ntdll/loader.c                |  16 +-
+ dlls/ntdll/tests/threadpool.c      | 101 ++++++-
+ dlls/ntdll/threadpool.c            | 151 +++++++---
+ dlls/ntdll/unix/coop_proto.h       |  62 ++++
+ dlls/ntdll/unix/loader.c           | 261 ++++++++++++++++-
+ dlls/ntdll/unix/msync.c            |  26 +-
+ dlls/ntdll/unix/process.c          |  48 +++-
+ dlls/ntdll/unix/signal_x86_64.c    |  61 ++++
+ dlls/ntdll/unix/sync.c             |   9 +-
+ dlls/opengl32/unix_wgl.c           |  61 ++++
+ dlls/shell32/shellpath.c           |   5 +-
+ dlls/winecoreaudio.drv/coreaudio.c | 252 +++++++++++++++-
+ dlls/wined3d/directx.c             |  13 +-
+ dlls/winemac.drv/cocoa_window.m    | 390 +++++++++++++++++++++++++
+ dlls/winemac.drv/d3dmetal.c        | 245 ++++++++++++++--
+ dlls/winemac.drv/gdi.c             |   7 +-
+ dlls/winemac.drv/macdrv.h          |  17 +-
+ dlls/winemac.drv/macdrv_cocoa.h    |  14 +
+ dlls/winemac.drv/vulkan.c          |   9 +-
+ dlls/winemac.drv/window.c          | 448 ++++++++++++++++++++++++++++-
+ include/winbase.h                  |  12 +
+ loader/wine.inf.in                 |  17 ++
+ server/msync.c                     |  10 +-
+ 34 files changed, 2470 insertions(+), 325 deletions(-)
+ create mode 100644 dlls/ntdll/unix/coop_proto.h
+
+diff --git a/dlls/advapi32/advapi.c b/dlls/advapi32/advapi.c
+index 1d36dd4..5ba7c93 100644
+--- a/dlls/advapi32/advapi.c
++++ b/dlls/advapi32/advapi.c
+@@ -48,16 +48,6 @@ BOOL WINAPI GetUserNameA( LPSTR name, LPDWORD size )
+     DWORD len = GetEnvironmentVariableA( "WINEUSERNAME", name, *size );
+     BOOL ret;
+ 
+-    /* CrossOver Hack 12735: Use a consistent username */
+-    if (!getenv( "CX_REPORT_REAL_USERNAME" ))
+-    {
+-        len = sizeof("crossover");
+-        if ((ret = (len <= *size))) strcpy( name, "crossover" );
+-        else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+-        *size = len;
+-        return ret;
+-    }
+-
+     if (!len) return FALSE;
+     if ((ret = (len < *size))) len++;
+     else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+@@ -73,16 +63,6 @@ BOOL WINAPI GetUserNameW( LPWSTR name, LPDWORD size )
+     DWORD len = GetEnvironmentVariableW( L"WINEUSERNAME", name, *size );
+     BOOL ret;
+ 
+-    /* CrossOver Hack 12735: Use a consistent username */
+-    if (!getenv( "CX_REPORT_REAL_USERNAME" ))
+-    {
+-        len = ARRAY_SIZE( L"crossover" );
+-        if ((ret = (len <= *size))) wcscpy( name, L"crossover" );
+-        else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+-        *size = len;
+-        return ret;
+-    }
+-
+     if (!len) return FALSE;
+     if ((ret = (len < *size))) len++;
+     else SetLastError( ERROR_INSUFFICIENT_BUFFER );
+diff --git a/dlls/advapi32/cred.c b/dlls/advapi32/cred.c
+index dd8d7ce..6cfce5e 100644
+--- a/dlls/advapi32/cred.c
++++ b/dlls/advapi32/cred.c
+@@ -1059,7 +1059,8 @@ BOOL WINAPI CredEnumerateW(LPCWSTR Filter, DWORD Flags, DWORD *Count, PCREDENTIA
+     if (ret == ERROR_SUCCESS)
+     {
+         ret = host_enumerate_credentials(Filter, NULL, NULL, &len, Count);
+-        if (ret == ERROR_NOT_SUPPORTED) ret = ERROR_SUCCESS;
++        /* nothing matching in the host's store is not a failure, the registry may hold the matches */
++        if (ret == ERROR_NOT_SUPPORTED || ret == ERROR_NOT_FOUND) ret = ERROR_SUCCESS;
+     }
+     if (ret == ERROR_SUCCESS && *Count == 0)
+         ret = ERROR_NOT_FOUND;
+@@ -1085,7 +1086,7 @@ BOOL WINAPI CredEnumerateW(LPCWSTR Filter, DWORD Flags, DWORD *Count, PCREDENTIA
+             if (ret == ERROR_SUCCESS)
+             {
+                 ret = host_enumerate_credentials(Filter, *Credentials, buffer, &len, Count);
+-                if (ret == ERROR_NOT_SUPPORTED) ret = ERROR_SUCCESS;
++                if (ret == ERROR_NOT_SUPPORTED || ret == ERROR_NOT_FOUND) ret = ERROR_SUCCESS;
+             }
+         }
+         else ret = ERROR_OUTOFMEMORY;
+diff --git a/dlls/kernel32/kernel32.spec b/dlls/kernel32/kernel32.spec
+index 6a35f53..852ee11 100644
+--- a/dlls/kernel32/kernel32.spec
++++ b/dlls/kernel32/kernel32.spec
+@@ -783,6 +783,7 @@
+ @ stdcall GetPackageFamilyName(long ptr ptr) kernelbase.GetPackageFamilyName
+ @ stdcall GetPackageFullName(long ptr ptr) kernelbase.GetPackageFullName
+ @ stdcall GetPackagesByPackageFamily(wstr ptr ptr ptr ptr) kernelbase.GetPackagesByPackageFamily
++@ stdcall GetPackagePath(ptr long ptr ptr) kernelbase.GetPackagePath
+ @ stdcall GetPackagePathByFullName(wstr ptr wstr) kernelbase.GetPackagePathByFullName
+ @ stdcall -import GetPhysicallyInstalledSystemMemory(ptr)
+ @ stdcall -import GetPriorityClass(long)
+@@ -1174,6 +1175,7 @@
+ @ stdcall -import PeekConsoleInputW(ptr ptr long ptr)
+ @ stdcall -import PeekNamedPipe(long ptr long ptr ptr ptr)
+ @ stdcall -import PostQueuedCompletionStatus(long long ptr ptr)
++@ stdcall -import PackageFullNameFromId(ptr ptr ptr)
+ @ stdcall -import PackageIdFromFullName(wstr long ptr ptr)
+ @ stdcall PowerClearRequest(long long)
+ @ stdcall PowerCreateRequest(ptr)
+diff --git a/dlls/kernelbase/kernelbase.spec b/dlls/kernelbase/kernelbase.spec
+index f172906..1610ad5 100644
+--- a/dlls/kernelbase/kernelbase.spec
++++ b/dlls/kernelbase/kernelbase.spec
+@@ -569,7 +569,7 @@
+ @ stdcall GetGeoInfoEx(ptr long ptr long)
+ @ stdcall GetHandleInformation(long ptr)
+ # @ stub GetHivePath
+-# @ stub GetIntegratedDisplaySize
++@ stdcall GetIntegratedDisplaySize(ptr)
+ # @ stub GetIsEdpEnabled
+ @ stdcall GetKernelObjectSecurity(long long ptr long ptr)
+ @ stdcall GetLargePageMinimum()
+@@ -636,7 +636,7 @@
+ # @ stub GetPackageInfo
+ # @ stub GetPackageInstallTime
+ # @ stub GetPackageOSMaxVersionTested
+-# @ stub GetPackagePath
++@ stdcall GetPackagePath(ptr long ptr ptr)
+ @ stdcall GetPackagePathByFullName(wstr ptr wstr)
+ # @ stub GetPackagePathOnVolume
+ # @ stub GetPackageProperty
+@@ -1051,7 +1051,7 @@
+ # @ stub PackageFamilyNameFromFullName
+ # @ stub PackageFamilyNameFromId
+ # @ stub PackageFamilyNameFromProductId
+-# @ stub PackageFullNameFromId
++@ stdcall PackageFullNameFromId(ptr ptr ptr)
+ # @ stub PackageFullNameFromProductId
+ @ stdcall PackageIdFromFullName(wstr long ptr ptr)
+ # @ stub PackageIdFromProductId
+diff --git a/dlls/kernelbase/main.c b/dlls/kernelbase/main.c
+index 0e19819..fb88cfc 100644
+--- a/dlls/kernelbase/main.c
++++ b/dlls/kernelbase/main.c
+@@ -636,3 +636,9 @@ HRESULT WINAPI GetAcceptLanguagesW(WCHAR *langbuf, DWORD *buflen)
+     *buflen = 0;
+     return E_NOT_SUFFICIENT_BUFFER;
+ }
++
++HRESULT WINAPI GetIntegratedDisplaySize( double *sz_inches )
++{
++    FIXME( "%p stub.\n", sz_inches );
++    return E_NOTIMPL;
++}
+diff --git a/dlls/kernelbase/process.c b/dlls/kernelbase/process.c
+index 867964e..8294d66 100644
+--- a/dlls/kernelbase/process.c
++++ b/dlls/kernelbase/process.c
+@@ -28,6 +28,7 @@
+ #include "winnls.h"
+ #include "wincontypes.h"
+ #include "winternl.h"
++#include "winreg.h"
+ 
+ #include "kernelbase.h"
+ #include "wine/debug.h"
+@@ -500,6 +501,41 @@ done:
+     return ret;
+ }
+ 
++
++/* Highball: HKCU\Software\Wine\AppDefaults\<exe>\CommandLineAppend (REG_SZ) is appended to
++ * that executable's command line when it is created. Some programs never forward switches to
++ * the subprocesses they spawn (a launcher's CEF browser reads its own --log-severity and GPU
++ * switches only from its own command line), and Proton solves the same problem with a
++ * hard-coded table in this function; the registry keeps it per-app data the bottle can carry. */
++static WCHAR *highball_append_command_line( const WCHAR *app_name, const WCHAR *cmdline )
++{
++    const WCHAR *base = app_name, *p;
++    WCHAR key[MAX_PATH + 40], value[1024], *ret;
++    DWORD type, size = sizeof(value);
++    HKEY hkey;
++    size_t len;
++
++    if (!app_name || !cmdline) return NULL;
++    for (p = app_name; *p; p++) if (*p == '\\' || *p == '/') base = p + 1;
++    if (!*base || lstrlenW( base ) >= MAX_PATH) return NULL;
++    swprintf( key, ARRAY_SIZE(key), L"Software\\Wine\\AppDefaults\\%s", base );
++    if (RegOpenKeyExW( HKEY_CURRENT_USER, key, 0, KEY_QUERY_VALUE, &hkey )) return NULL;
++    if (RegQueryValueExW( hkey, L"CommandLineAppend", NULL, &type, (BYTE *)value, &size ) ||
++        type != REG_SZ || size < sizeof(WCHAR))
++    {
++        RegCloseKey( hkey );
++        return NULL;
++    }
++    RegCloseKey( hkey );
++    value[ARRAY_SIZE(value) - 1] = 0;
++    if (!value[0]) return NULL;
++    len = lstrlenW( cmdline ) + 1 + lstrlenW( value ) + 1;
++    if (!(ret = HeapAlloc( GetProcessHeap(), 0, len * sizeof(WCHAR) ))) return NULL;
++    swprintf( ret, len, L"%s %s", cmdline, value );
++    FIXME( "HIGHBALL: appended %s to the command line of %s\n", debugstr_w(value), debugstr_w(base) );
++    return ret;
++}
++
+ /**********************************************************************
+  *           CreateProcessInternalW   (kernelbase.@)
+  */
+@@ -545,6 +581,13 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR
+         app_name = name;
+     }
+ 
++    /* Highball: per-executable command-line append (see highball_append_command_line) */
++    if ((p = highball_append_command_line( app_name, tidy_cmdline )))
++    {
++        if (tidy_cmdline != cmd_line) HeapFree( GetProcessHeap(), 0, tidy_cmdline );
++        tidy_cmdline = p;
++    }
++
+     /* CW Hack 24938 */
+     if (cmd_line && wcsstr(cmd_line, L"EpicGamesLauncher.exe"))
+     {
+diff --git a/dlls/kernelbase/thread.c b/dlls/kernelbase/thread.c
+index 610ae93..6874bb4 100644
+--- a/dlls/kernelbase/thread.c
++++ b/dlls/kernelbase/thread.c
+@@ -231,7 +231,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH GetExitCodeThread( HANDLE thread, LPDWORD exit_cod
+  */
+ DWORD WINAPI kernelbase_GetLastError(void)
+ {
+-    return NtCurrentTeb()->LastErrorValue;
++    return RtlGetLastWin32Error();   /* reads %gs:0x68 on x86_64, see ntdll/error.c */
+ }
+ 
+ 
+@@ -1145,6 +1145,26 @@ LPVOID WINAPI DECLSPEC_HOTPATCH CreateFiberEx( SIZE_T stack_commit, SIZE_T stack
+ }
+ 
+ 
++/* On macOS the %gs base is the host thread block, not the TEB, so signal_init_process()
++ * mirrors individual TEB fields into it. Tib.FiberData was never mirrored, but
++ * GetCurrentFiber() is an intrinsic that reads %gs:0x20 directly and cannot be intercepted,
++ * so a game's job system reads a host value and hands it back to SwitchToFiber, which
++ * dereferences it (Marvel's Guardians of the Galaxy: read of 0x907, i.e. 0x8ff + 8).
++ * Keep the mirror in step wherever Tib.FiberData changes.
++ *
++ * On macOS this slot holds the thread's pthread QoS class, which is lost for threads that
++ * use fibers. Windows and macOS both fix the offset, so the two cannot coexist. Not guarded
++ * on __APPLE__: this file is built for PE by mingw, where that macro is never defined. Where
++ * %gs maps to the TEB the store writes the same address as the assignment above it. */
++static inline void set_teb_fiber_data( void *fiber )
++{
++    NtCurrentTeb()->Tib.FiberData = fiber;
++#ifdef __x86_64__
++    __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (fiber), "n" (FIELD_OFFSET(TEB, Tib.FiberData)));
++#endif
++}
++
++
+ /***********************************************************************
+  *           ConvertFiberToThread   (kernelbase.@)
+  */
+@@ -1155,7 +1175,7 @@ BOOL WINAPI DECLSPEC_HOTPATCH ConvertFiberToThread(void)
+     if (fiber)
+     {
+         relocate_thread_actctx_stack( &NtCurrentTeb()->ActivationContextStack );
+-        NtCurrentTeb()->Tib.FiberData = NULL;
++        set_teb_fiber_data( NULL );
+         HeapFree( GetProcessHeap(), 0, fiber );
+     }
+     return TRUE;
+@@ -1217,7 +1237,7 @@ LPVOID WINAPI DECLSPEC_HOTPATCH ConvertThreadToFiberEx( LPVOID param, DWORD flag
+     fiber->flags            = flags;
+     fiber->fls_slots        = NtCurrentTeb()->FlsSlots;
+     relocate_thread_actctx_stack( &fiber->actctx.stack_space );
+-    NtCurrentTeb()->Tib.FiberData = fiber;
++    set_teb_fiber_data( fiber );
+     return fiber;
+ }
+ 
+@@ -1267,7 +1287,7 @@ void WINAPI DECLSPEC_HOTPATCH SwitchToFiber( LPVOID fiber )
+     /* stack_allocation and stack_base never change */
+ 
+     /* FIXME: should save floating point context if requested in fiber->flags */
+-    NtCurrentTeb()->Tib.FiberData     = new_fiber;
++    set_teb_fiber_data( new_fiber );
+     NtCurrentTeb()->Tib.ExceptionList = new_fiber->except;
+     NtCurrentTeb()->Tib.StackBase     = new_fiber->stack_base;
+     NtCurrentTeb()->Tib.StackLimit    = new_fiber->stack_limit;
+diff --git a/dlls/kernelbase/version.c b/dlls/kernelbase/version.c
+index 495325b..6d09a97 100644
+--- a/dlls/kernelbase/version.c
++++ b/dlls/kernelbase/version.c
+@@ -32,6 +32,7 @@
+ #define WIN32_NO_STATUS
+ #include "windef.h"
+ #include "winbase.h"
++#include "winreg.h"
+ #include "winver.h"
+ #include "winuser.h"
+ #include "winnls.h"
+@@ -44,6 +45,10 @@
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(ver);
+ 
++/* Where installed app packages are registered (Highball: from Proton, Paul Gofman). */
++static const WCHAR packages_key_name[] = L"Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows"
++        L"\\CurrentVersion\\AppModel\\PackageRepository\\Packages";
++
+ typedef struct
+ {
+     WORD offset;
+@@ -1647,17 +1652,111 @@ LONG WINAPI /* DECLSPEC_HOTPATCH */ GetPackageFamilyName( HANDLE process, UINT32
+ /***********************************************************************
+  *         GetPackagesByPackageFamily   (kernelbase.@)
+  */
+-LONG WINAPI DECLSPEC_HOTPATCH GetPackagesByPackageFamily(const WCHAR *family_name, UINT32 *count,
+-                                                         WCHAR *full_names, UINT32 *buffer_len, WCHAR *buffer)
++LONG WINAPI GetPackagesByPackageFamily(const WCHAR *family_name, UINT32 *count, WCHAR **full_names,
++        UINT32 *buffer_length, WCHAR *buffer)
+ {
+-    FIXME( "(%s %p %p %p %p): stub\n", debugstr_w(family_name), count, full_names, buffer_len, buffer );
++    UINT32 curr_count, curr_length, package_id_buf_size, size;
++    unsigned int i, name_len, publisher_id_len;
++    DWORD subkey_count, max_key_len, length;
++    const WCHAR *publisher_id;
++    WCHAR *package_name;
++    BOOL short_buffer;
++    PACKAGE_ID *id;
++    HKEY key;
++
++    TRACE("family_name %s, count %p, full_names %p, buffer_length %p, buffer %p.\n",
++            debugstr_w(family_name), count, full_names, buffer_length, buffer);
++
++    if (!buffer_length || !count || !family_name)
++        return ERROR_INVALID_PARAMETER;
+ 
+-    if (!count || !buffer_len)
++    if ((*buffer_length || *count) && (!full_names || !buffer))
+         return ERROR_INVALID_PARAMETER;
+ 
+-    *count = 0;
+-    *buffer_len = 0;
+-    return ERROR_SUCCESS;
++    if (!(publisher_id = wcschr(family_name, L'_')))
++        return ERROR_INVALID_PARAMETER;
++
++    name_len = publisher_id - family_name;
++    ++publisher_id;
++    publisher_id_len = lstrlenW(publisher_id);
++
++    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, packages_key_name, 0, KEY_READ, &key))
++    {
++        ERR("Key open failed.\n");
++        *count = 0;
++        *buffer_length = 0;
++        return ERROR_SUCCESS;
++    }
++    if (RegQueryInfoKeyW(key, NULL, NULL, NULL, &subkey_count, &max_key_len, NULL, NULL, NULL, NULL, NULL, NULL))
++    {
++        ERR("Query key info failed.\n");
++        RegCloseKey(key);
++        *count = 0;
++        *buffer_length = 0;
++        return ERROR_SUCCESS;
++    }
++
++    if (!(package_name = HeapAlloc(GetProcessHeap(), 0, (max_key_len + 1) * sizeof(*package_name))))
++    {
++        ERR("No memory.\n");
++        RegCloseKey(key);
++        return ERROR_OUTOFMEMORY;
++    }
++
++    package_id_buf_size = sizeof(*id) + (max_key_len + 1) * sizeof(WCHAR);
++    if (!(id = HeapAlloc(GetProcessHeap(), 0, package_id_buf_size)))
++    {
++        ERR("No memory.\n");
++        HeapFree(GetProcessHeap(), 0, package_name);
++        RegCloseKey(key);
++        return ERROR_OUTOFMEMORY;
++    }
++
++    curr_count = curr_length = 0;
++    for (i = 0; i < subkey_count; ++i)
++    {
++        length = max_key_len + 1;
++        if (RegEnumKeyExW(key, i, package_name, &length, NULL, NULL, NULL, NULL))
++        {
++            ERR("Error enumerating key %u.\n", i);
++            continue;
++        }
++
++        size = package_id_buf_size;
++        if (PackageIdFromFullName(package_name, 0, &size, (BYTE *)id))
++        {
++            ERR("Error getting package id from full name.\n");
++            continue;
++        }
++
++        if (lstrlenW(id->name) != name_len)
++            continue;
++        if (wcsnicmp(family_name, id->name, name_len))
++            continue;
++
++        if (lstrlenW(id->publisherId) != publisher_id_len)
++            continue;
++        if (wcsnicmp(publisher_id, id->publisherId, publisher_id_len))
++            continue;
++        if (curr_length + length < *buffer_length)
++        {
++            memcpy(buffer + curr_length, package_name, (length + 1) * sizeof(*package_name));
++            if (curr_count < *count)
++                full_names[curr_count] = buffer + curr_length;
++        }
++        curr_length += length + 1;
++        ++curr_count;
++    }
++
++    HeapFree(GetProcessHeap(), 0, id);
++    HeapFree(GetProcessHeap(), 0, package_name);
++    RegCloseKey(key);
++
++    short_buffer = curr_length > *buffer_length || curr_count > *count;
++    *count = curr_count;
++    *buffer_length = curr_length;
++
++    return short_buffer ? ERROR_INSUFFICIENT_BUFFER : ERROR_SUCCESS;
+ }
+ 
+ /***********************************************************************
+@@ -1698,6 +1797,16 @@ static UINT32 processor_arch_from_string(const WCHAR *str, unsigned int len)
+     return ~0u;
+ }
+ 
++static const WCHAR *string_from_processor_arch(UINT32 code)
++{
++    unsigned int i;
++
++    for (i = 0; i < ARRAY_SIZE(arch_names); ++i)
++        if (code == arch_names[i].code)
++            return arch_names[i].name;
++    return NULL;
++}
++
+ /***********************************************************************
+  *         PackageIdFromFullName   (kernelbase.@)
+  */
+@@ -1786,3 +1895,116 @@ LONG WINAPI PackageIdFromFullName(const WCHAR *full_name, UINT32 flags, UINT32 *
+ 
+     return ERROR_SUCCESS;
+ }
++
++/***********************************************************************
++ *         PackageFullNameFromId   (kernelbase.@)
++ */
++LONG WINAPI PackageFullNameFromId(const PACKAGE_ID *package_id, UINT32 *length, WCHAR *full_name)
++{
++    WCHAR ver_str[5 * 4 + 3 + 1];
++    const WCHAR *arch_str;
++    UINT32 have_length;
++
++    TRACE("package_id %p, length %p, full_name %p.\n", package_id, length, full_name);
++
++    if (!package_id || !length)
++        return ERROR_INVALID_PARAMETER;
++    if (!full_name && *length)
++        return ERROR_INVALID_PARAMETER;
++    if (!package_id->name || !package_id->resourceId || !package_id->publisherId
++            || !(arch_str = string_from_processor_arch(package_id->processorArchitecture)))
++        return ERROR_INVALID_PARAMETER;
++
++    swprintf(ver_str, ARRAY_SIZE(ver_str), L"%u.%u.%u.%u", package_id->version.Major,
++            package_id->version.Minor, package_id->version.Build, package_id->version.Revision);
++    have_length = *length;
++    *length = lstrlenW(package_id->name) + 1 + lstrlenW(ver_str) + 1 + lstrlenW(arch_str) + 1
++            + lstrlenW(package_id->resourceId) + 1 + lstrlenW(package_id->publisherId) + 1;
++
++    if (have_length < *length)
++        return ERROR_INSUFFICIENT_BUFFER;
++
++    swprintf(full_name, *length, L"%s_%s_%s_%s_%s", package_id->name, ver_str, arch_str, package_id->resourceId, package_id->publisherId);
++    return ERROR_SUCCESS;
++}
++
++/***********************************************************************
++ *         GetPackagePath   (kernelbase.@)
++ */
++LONG WINAPI GetPackagePath(const PACKAGE_ID *package_id, const UINT32 reserved, UINT32 *length, WCHAR *path)
++{
++    WCHAR *key_name = NULL, *expanded_path = NULL;
++    UINT32 required_length, have_length;
++    unsigned int offset;
++    HKEY key = NULL;
++    DWORD size;
++    LONG ret;
++
++    TRACE("package_id %p, reserved %u, length %p, path %p.\n", package_id, reserved, length, path);
++
++    if (!length)
++        return ERROR_INVALID_PARAMETER;
++    if (!path && *length)
++        return ERROR_INVALID_PARAMETER;
++
++    required_length = 0;
++    if ((ret = PackageFullNameFromId(package_id, &required_length, NULL)) != ERROR_INSUFFICIENT_BUFFER)
++        return ret;
++
++    offset = lstrlenW(packages_key_name) + 1;
++    if (!(key_name = HeapAlloc(GetProcessHeap(), 0, (offset + required_length) * sizeof(WCHAR))))
++    {
++        ERR("No memory.");
++        return ERROR_OUTOFMEMORY;
++    }
++
++    if ((ret = PackageFullNameFromId(package_id, &required_length, key_name + offset)))
++        goto done;
++
++    memcpy(key_name, packages_key_name, (offset - 1) * sizeof(WCHAR));
++    key_name[offset - 1] = L'\\';
++
++    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, key_name, 0, KEY_READ, &key))
++    {
++        WARN("Key %s not found.\n", debugstr_w(key_name));
++        ret = ERROR_NOT_FOUND;
++        goto done;
++    }
++    if (RegGetValueW(key, NULL, L"Path", RRF_RT_REG_SZ, NULL, NULL, &size))
++    {
++        WARN("Path value not found in %s.\n", debugstr_w(key_name));
++        ret = ERROR_NOT_FOUND;
++        goto done;
++    }
++    if (!(expanded_path = HeapAlloc(GetProcessHeap(), 0, size)))
++    {
++        ERR("No memory.");
++        ret = ERROR_OUTOFMEMORY;
++        goto done;
++    }
++    if (RegGetValueW(key, NULL, L"Path", RRF_RT_REG_SZ, NULL, expanded_path, &size))
++    {
++        WARN("Could not get Path value from %s.\n", debugstr_w(key_name));
++        ret = ERROR_NOT_FOUND;
++        goto done;
++    }
++
++    have_length = *length;
++    *length = lstrlenW(expanded_path) + 1;
++    if (have_length >= *length)
++    {
++        memcpy(path, expanded_path, *length * sizeof(*path));
++        ret = ERROR_SUCCESS;
++    }
++    else
++    {
++        ret = ERROR_INSUFFICIENT_BUFFER;
++    }
++
++done:
++    if (key)
++        RegCloseKey(key);
++    HeapFree(GetProcessHeap(), 0, expanded_path);
++    HeapFree(GetProcessHeap(), 0, key_name);
++    return ret;
++}
+diff --git a/dlls/mfreadwrite/reader.c b/dlls/mfreadwrite/reader.c
+index d7653c2..d97231f 100644
+--- a/dlls/mfreadwrite/reader.c
++++ b/dlls/mfreadwrite/reader.c
+@@ -89,7 +89,6 @@ struct media_stream
+     IMFMediaStream *stream;
+     IMFMediaType *current;
+     struct list transforms;
+-    IMFVideoSampleAllocatorEx *allocator;
+     IMFTransform *transform_service;
+     DWORD id;
+     unsigned int index;
+@@ -232,8 +231,6 @@ static void media_stream_destroy(struct media_stream *stream)
+         IMFMediaStream_Release(stream->stream);
+     if (stream->current)
+         IMFMediaType_Release(stream->current);
+-    if (stream->allocator)
+-        IMFVideoSampleAllocatorEx_Release(stream->allocator);
+ }
+ 
+ static ULONG source_reader_release(struct source_reader *reader)
+@@ -429,39 +426,6 @@ static void source_reader_response_ready(struct source_reader *reader, struct st
+     stream->requests--;
+ }
+ 
+-static void source_reader_copy_sample_buffer(IMFSample *src, IMFSample *dst)
+-{
+-    IMFMediaBuffer *buffer;
+-    LONGLONG time;
+-    DWORD flags;
+-    HRESULT hr;
+-
+-    IMFSample_CopyAllItems(src, (IMFAttributes *)dst);
+-
+-    IMFSample_SetSampleDuration(dst, 0);
+-    IMFSample_SetSampleTime(dst, 0);
+-    IMFSample_SetSampleFlags(dst, 0);
+-
+-    if (SUCCEEDED(IMFSample_GetSampleDuration(src, &time)))
+-        IMFSample_SetSampleDuration(dst, time);
+-
+-    if (SUCCEEDED(IMFSample_GetSampleTime(src, &time)))
+-        IMFSample_SetSampleTime(dst, time);
+-
+-    if (SUCCEEDED(IMFSample_GetSampleFlags(src, &flags)))
+-        IMFSample_SetSampleFlags(dst, flags);
+-
+-    if (SUCCEEDED(IMFSample_ConvertToContiguousBuffer(src, NULL)))
+-    {
+-        if (SUCCEEDED(IMFSample_GetBufferByIndex(dst, 0, &buffer)))
+-        {
+-            if (FAILED(hr = IMFSample_CopyToBuffer(src, buffer)))
+-                WARN("Failed to copy a buffer, hr %#lx.\n", hr);
+-            IMFMediaBuffer_Release(buffer);
+-        }
+-    }
+-}
+-
+ static HRESULT source_reader_queue_response(struct source_reader *reader, struct media_stream *stream, HRESULT status,
+         DWORD stream_flags, LONGLONG timestamp, IMFSample *sample)
+ {
+@@ -1221,8 +1185,6 @@ static struct stream_response * media_stream_detach_response(struct source_reade
+ static struct stream_response *media_stream_pop_response(struct source_reader *reader, struct media_stream *stream)
+ {
+     struct stream_response *response;
+-    IMFSample *sample;
+-    HRESULT hr;
+ 
+     LIST_FOR_EACH_ENTRY(response, &reader->responses, struct stream_response, entry)
+     {
+@@ -1231,26 +1193,6 @@ static struct stream_response *media_stream_pop_response(struct source_reader *r
+ 
+         if (!stream) stream = &reader->streams[response->stream_index];
+ 
+-        if (response->sample && stream->allocator)
+-        {
+-            /* Return allocation error to the caller, while keeping original response sample in for later. */
+-            if (SUCCEEDED(hr = IMFVideoSampleAllocatorEx_AllocateSample(stream->allocator, &sample)))
+-            {
+-                source_reader_copy_sample_buffer(response->sample, sample);
+-                IMFSample_Release(response->sample);
+-                response->sample = sample;
+-            }
+-            else
+-            {
+-                if (!(response = calloc(1, sizeof(*response))))
+-                    return NULL;
+-
+-                response->status = hr;
+-                response->stream_flags = MF_SOURCE_READERF_ERROR;
+-                return response;
+-            }
+-        }
+-
+         return media_stream_detach_response(reader, response);
+     }
+ 
+@@ -1664,7 +1606,6 @@ static ULONG WINAPI src_reader_Release(IMFSourceReaderEx *iface)
+ {
+     struct source_reader *reader = impl_from_IMFSourceReaderEx(iface);
+     ULONG refcount = InterlockedDecrement(&reader->public_refcount);
+-    unsigned int i;
+ 
+     TRACE("%p, refcount %lu.\n", iface, refcount);
+ 
+@@ -1684,23 +1625,6 @@ static ULONG WINAPI src_reader_Release(IMFSourceReaderEx *iface)
+             LeaveCriticalSection(&reader->cs);
+         }
+ 
+-        for (i = 0; i < reader->stream_count; ++i)
+-        {
+-            struct media_stream *stream = &reader->streams[i];
+-            IMFVideoSampleAllocatorCallback *callback;
+-
+-            if (!stream->allocator)
+-                continue;
+-
+-            if (SUCCEEDED(IMFVideoSampleAllocatorEx_QueryInterface(stream->allocator, &IID_IMFVideoSampleAllocatorCallback,
+-                    (void **)&callback)))
+-            {
+-                IMFVideoSampleAllocatorCallback_SetCallback(callback, NULL);
+-                IMFVideoSampleAllocatorCallback_Release(callback);
+-            }
+-        }
+-
+-        MFUnlockWorkQueue(reader->queue);
+         source_reader_release(reader);
+     }
+ 
+@@ -1951,71 +1875,6 @@ static HRESULT source_reader_set_compatible_media_type(struct source_reader *rea
+     return type_set ? S_OK : S_FALSE;
+ }
+ 
+-static HRESULT source_reader_create_sample_allocator_attributes(const struct source_reader *reader,
+-        IMFAttributes **attributes)
+-{
+-    UINT32 shared = 0, shared_without_mutex = 0;
+-    HRESULT hr;
+-
+-    if (FAILED(hr = MFCreateAttributes(attributes, 1)))
+-        return hr;
+-
+-    IMFAttributes_GetUINT32(reader->attributes, &MF_SA_D3D11_SHARED, &shared);
+-    IMFAttributes_GetUINT32(reader->attributes, &MF_SA_D3D11_SHARED_WITHOUT_MUTEX, &shared_without_mutex);
+-
+-    if (shared_without_mutex)
+-        hr = IMFAttributes_SetUINT32(*attributes, &MF_SA_D3D11_SHARED_WITHOUT_MUTEX, TRUE);
+-    else if (shared)
+-        hr = IMFAttributes_SetUINT32(*attributes, &MF_SA_D3D11_SHARED, TRUE);
+-
+-    return hr;
+-}
+-
+-static HRESULT source_reader_setup_sample_allocator(struct source_reader *reader, unsigned int index)
+-{
+-    struct media_stream *stream = &reader->streams[index];
+-    IMFAttributes *attributes = NULL;
+-    GUID major = { 0 };
+-    HRESULT hr;
+-
+-    IMFMediaType_GetMajorType(stream->current, &major);
+-    if (!IsEqualGUID(&major, &MFMediaType_Video))
+-        return S_OK;
+-
+-    if (!(reader->flags & SOURCE_READER_HAS_DEVICE_MANAGER))
+-        return S_OK;
+-
+-    if (!stream->allocator)
+-    {
+-        if (FAILED(hr = MFCreateVideoSampleAllocatorEx(&IID_IMFVideoSampleAllocatorEx, (void **)&stream->allocator)))
+-        {
+-            WARN("Failed to create sample allocator, hr %#lx.\n", hr);
+-            return hr;
+-        }
+-    }
+-
+-    IMFVideoSampleAllocatorEx_UninitializeSampleAllocator(stream->allocator);
+-    if (FAILED(hr = IMFVideoSampleAllocatorEx_SetDirectXManager(stream->allocator, reader->device_manager)))
+-    {
+-        WARN("Failed to set device manager, hr %#lx.\n", hr);
+-        return hr;
+-    }
+-
+-    if (FAILED(hr = source_reader_create_sample_allocator_attributes(reader, &attributes)))
+-        WARN("Failed to create allocator attributes, hr %#lx.\n", hr);
+-
+-    if (FAILED(hr = IMFVideoSampleAllocatorEx_InitializeSampleAllocatorEx(stream->allocator, 2, 8,
+-            attributes, stream->current)))
+-    {
+-        WARN("Failed to initialize sample allocator, hr %#lx.\n", hr);
+-    }
+-
+-    if (attributes)
+-        IMFAttributes_Release(attributes);
+-
+-    return hr;
+-}
+-
+ static BOOL source_reader_allow_video_processor(struct source_reader *reader, BOOL *advanced)
+ {
+     UINT32 value;
+@@ -2319,8 +2178,6 @@ static HRESULT WINAPI src_reader_SetCurrentMediaType(IMFSourceReaderEx *iface, D
+     hr = source_reader_set_compatible_media_type(reader, index, type);
+     if (hr == S_FALSE)
+         hr = source_reader_create_decoder_for_stream(reader, index, type);
+-    if (SUCCEEDED(hr))
+-        hr = source_reader_setup_sample_allocator(reader, index);
+ 
+     LeaveCriticalSection(&reader->cs);
+ 
+diff --git a/dlls/mmdevapi/spatialaudio.c b/dlls/mmdevapi/spatialaudio.c
+index 8ae37cb..b12adb3 100644
+--- a/dlls/mmdevapi/spatialaudio.c
++++ b/dlls/mmdevapi/spatialaudio.c
+@@ -673,31 +673,42 @@ static WAVEFORMATEX *clone_fmtex(const WAVEFORMATEX *src)
+ 
+ static void static_mask_to_channels(AudioObjectType static_mask, WORD *count, DWORD *mask, UINT32 *map)
+ {
+-    UINT32 out_chan = 0, map_idx = 0;
++    static const struct { AudioObjectType type; DWORD speaker; } table[] = {
++        { AudioObjectType_FrontLeft, SPEAKER_FRONT_LEFT },
++        { AudioObjectType_FrontRight, SPEAKER_FRONT_RIGHT },
++        { AudioObjectType_FrontCenter, SPEAKER_FRONT_CENTER },
++        { AudioObjectType_LowFrequency, SPEAKER_LOW_FREQUENCY },
++        { AudioObjectType_SideLeft, SPEAKER_SIDE_LEFT },
++        { AudioObjectType_SideRight, SPEAKER_SIDE_RIGHT },
++        { AudioObjectType_BackLeft, SPEAKER_BACK_LEFT },
++        { AudioObjectType_BackRight, SPEAKER_BACK_RIGHT },
++        { AudioObjectType_TopFrontLeft, SPEAKER_TOP_FRONT_LEFT },
++        { AudioObjectType_TopFrontRight, SPEAKER_TOP_FRONT_RIGHT },
++        { AudioObjectType_TopBackLeft, SPEAKER_TOP_BACK_LEFT },
++        { AudioObjectType_TopBackRight, SPEAKER_TOP_BACK_RIGHT },
++        { AudioObjectType_BackCenter, SPEAKER_BACK_CENTER },
++    };
++    UINT32 i;
++
+     *count = 0;
+     *mask = 0;
+-#define CONVERT_MASK(f, t) \
+-    if(static_mask & f){ \
+-        *count += 1; \
+-        *mask |= t; \
+-        map[map_idx++] = out_chan++; \
+-        TRACE("mapping 0x%x to %u\n", f, out_chan - 1); \
+-    }else{ \
+-        map[map_idx++] = ~0; \
+-    }
+-    CONVERT_MASK(AudioObjectType_FrontLeft, SPEAKER_FRONT_LEFT);
+-    CONVERT_MASK(AudioObjectType_FrontRight, SPEAKER_FRONT_RIGHT);
+-    CONVERT_MASK(AudioObjectType_FrontCenter, SPEAKER_FRONT_CENTER);
+-    CONVERT_MASK(AudioObjectType_LowFrequency, SPEAKER_LOW_FREQUENCY);
+-    CONVERT_MASK(AudioObjectType_SideLeft, SPEAKER_SIDE_LEFT);
+-    CONVERT_MASK(AudioObjectType_SideRight, SPEAKER_SIDE_RIGHT);
+-    CONVERT_MASK(AudioObjectType_BackLeft, SPEAKER_BACK_LEFT);
+-    CONVERT_MASK(AudioObjectType_BackRight, SPEAKER_BACK_RIGHT);
+-    CONVERT_MASK(AudioObjectType_TopFrontLeft, SPEAKER_TOP_FRONT_LEFT);
+-    CONVERT_MASK(AudioObjectType_TopFrontRight, SPEAKER_TOP_FRONT_RIGHT);
+-    CONVERT_MASK(AudioObjectType_TopBackLeft, SPEAKER_TOP_BACK_LEFT);
+-    CONVERT_MASK(AudioObjectType_TopBackRight, SPEAKER_TOP_BACK_RIGHT);
+-    CONVERT_MASK(AudioObjectType_BackCenter, SPEAKER_BACK_CENTER);
++    for (i = 0; i < ARRAY_SIZE(table); i++)
++        if (static_mask & table[i].type) {
++            *mask |= table[i].speaker;
++            *count += 1;
++        }
++    /* WAVEFORMATEXTENSIBLE channels follow the speaker bits in ascending order, so a static object's
++     * channel is the number of speakers in the mask below its own: back left/right (0x10, 0x20) and
++     * back centre (0x100) come before side left/right (0x200, 0x400). */
++    for (i = 0; i < 17; i++)
++        map[i] = ~0;
++    for (i = 0; i < ARRAY_SIZE(table); i++) {
++        if (static_mask & table[i].type) {
++            UINT32 idx = AudioObjectType_to_index(table[i].type);
++            map[idx] = __builtin_popcount(*mask & (table[i].speaker - 1));
++            TRACE("mapping 0x%x to %u\n", table[i].type, map[idx]);
++        }
++    }
+ }
+ 
+ static HRESULT activate_stream(SpatialAudioStreamImpl *stream)
+diff --git a/dlls/ntdll/error.c b/dlls/ntdll/error.c
+index 5412b19..1ea1ca8 100644
+--- a/dlls/ntdll/error.c
++++ b/dlls/ntdll/error.c
+@@ -104,7 +104,16 @@ NTSTATUS WINAPI RtlGetLastNtStatus(void)
+  */
+ DWORD WINAPI RtlGetLastWin32Error(void)
+ {
++#ifdef __x86_64__
++    /* Read the value where MSVC-built code reads it (%gs:0x68). On Linux that is the TEB field
++     * itself; on macOS it is the slot the unix side hands to PE code as LastErrorValue
++     * (signal_x86_64.c), kept in step with the TEB at every PE/unix crossing. */
++    DWORD err;
++    __asm__ volatile( "movl %%gs:0x68,%0" : "=r" (err) );
++    return err;
++#else
+     return NtCurrentTeb()->LastErrorValue;
++#endif
+ }
+ 
+ /***********************************************************************
+@@ -122,6 +131,9 @@ DWORD WINAPI RtlGetLastWin32Error(void)
+ void WINAPI RtlSetLastWin32Error( DWORD err )
+ {
+     NtCurrentTeb()->LastErrorValue = err;
++#ifdef __x86_64__
++    __asm__ volatile( "movl %0,%%gs:0x68" :: "r" (err) );   /* see RtlGetLastWin32Error */
++#endif
+ }
+ 
+ /***********************************************************************
+@@ -137,5 +149,5 @@ void WINAPI RtlSetLastWin32Error( DWORD err )
+  */
+ void WINAPI RtlSetLastWin32ErrorAndNtStatusFromNtStatus( NTSTATUS status )
+ {
+-    NtCurrentTeb()->LastErrorValue = RtlNtStatusToDosError( status );
++    RtlSetLastWin32Error( RtlNtStatusToDosError( status ) );
+ }
+diff --git a/dlls/ntdll/loader.c b/dlls/ntdll/loader.c
+index e1aea34..0a34640 100644
+--- a/dlls/ntdll/loader.c
++++ b/dlls/ntdll/loader.c
+@@ -1613,11 +1613,21 @@ static WINE_MODREF *alloc_module( HMODULE hModule, const UNICODE_STRING *nt_name
+         ERR( "rtl_rb_tree_put failed.\n" );
+     /* wait until init is called for inserting into InInitializationOrderModuleList */
+ 
+-    if (!(nt->OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_NX_COMPAT))
++    /* Data execution prevention follows the main executable, as on Windows: a
++     * DLL without IMAGE_DLLCHARACTERISTICS_NX_COMPAT does not turn it off for
++     * the process. Turning it off forces PROT_EXEC on every readable mapping,
++     * and under Rosetta each fresh writable and executable page then costs a
++     * Mach round trip on first touch, so the process policy keeps it on there
++     * unless WINE_DISABLE_NX_COMPAT=0. */
++    if (hModule == NtCurrentTeb()->Peb->ImageBaseAddress &&
++        !(nt->OptionalHeader.DllCharacteristics & IMAGE_DLLCHARACTERISTICS_NX_COMPAT))
+     {
+         ULONG flags = MEM_EXECUTE_OPTION_ENABLE;
+-        WARN( "disabling no-exec because of %s\n", debugstr_w(wm->ldr.BaseDllName.Buffer) );
+-        NtSetInformationProcess( GetCurrentProcess(), ProcessExecuteFlags, &flags, sizeof(flags) );
++        if (!NtSetInformationProcess( GetCurrentProcess(), ProcessExecuteFlags, &flags, sizeof(flags) ))
++            WARN( "disabling no-exec because %s is not NX compatible\n",
++                  debugstr_w(wm->ldr.BaseDllName.Buffer) );
++        else
++            WARN( "keeping no-exec for %s\n", debugstr_w(wm->ldr.BaseDllName.Buffer) );
+     }
+     return wm;
+ }
+diff --git a/dlls/ntdll/tests/threadpool.c b/dlls/ntdll/tests/threadpool.c
+index 55d59d5..5da4687 100644
+--- a/dlls/ntdll/tests/threadpool.c
++++ b/dlls/ntdll/tests/threadpool.c
+@@ -2045,6 +2045,7 @@ static void test_tp_io(void)
+     char in[1], in2[1];
+     NTSTATUS status;
+     DWORD ret_size;
++    unsigned int i;
+     TP_POOL *pool;
+     TP_IO *io;
+     BOOL ret;
+@@ -2222,25 +2223,103 @@ static void test_tp_io(void)
+     ret = HeapValidate(GetProcessHeap(), 0, io);
+     ok(ret, "Got unexpected ret %#x.\n", ret);
+ 
+-    if (0)
++    /* TpWaitForIoCompletion(..., TRUE) moved the start into skipped_count.
++     * The object stays allocated across TpReleaseIoCompletion() and is freed
++     * when that completion arrives. The callback is not run. */
++    userdata.count = 0;
++    ret = ReadFile(server, in, sizeof(in), NULL, &ovl);
++    ok(!ret, "wrong ret %d\n", ret);
++    ret = WriteFile(client, out, sizeof(out), &ret_size, NULL);
++    ok(ret, "WriteFile() failed, error %lu\n", GetLastError());
++    for (i = 0; i < 100 && HeapValidate(GetProcessHeap(), 0, io); ++i)
++        Sleep(10);
++    ok(!HeapValidate(GetProcessHeap(), 0, io), "object was not freed after the skipped completion\n");
++    ok(!userdata.count, "callback ran %u times\n", userdata.count);
++    CloseHandle(server);
++    CloseHandle(client);
++
++    /* A start that is still outstanding keeps the object alive across
++     * release, and the callback runs once that completion arrives. */
++    server = CreateNamedPipeA("\\\\.\\pipe\\wine_tp_test",
++            PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, 0, 1, 1024, 1024, 0, NULL);
++    ok(server != INVALID_HANDLE_VALUE, "Failed to create server pipe, error %lu.\n", GetLastError());
++    client = CreateFileA("\\\\.\\pipe\\wine_tp_test", GENERIC_READ | GENERIC_WRITE,
++            0, NULL, OPEN_EXISTING, 0, 0);
++    ok(client != INVALID_HANDLE_VALUE, "Failed to create client pipe, error %lu.\n", GetLastError());
++    io = NULL;
++    status = pTpAllocIoCompletion(&io, server, io_cb, &userdata, &environment);
++    ok(!status, "got %#lx\n", status);
++    userdata.count = 0;
++    pTpStartAsyncIoOperation(io);
++    pTpReleaseIoCompletion(io);
++    ok(HeapValidate(GetProcessHeap(), 0, io), "object freed while a completion is still expected\n");
++    ret = ReadFile(server, in, sizeof(in), NULL, &ovl);
++    ok(!ret, "wrong ret %d\n", ret);
++    ret = WriteFile(client, out, sizeof(out), &ret_size, NULL);
++    ok(ret, "WriteFile() failed, error %lu\n", GetLastError());
++    /* The callback drops the last reference, so do not call
++     * TpWaitForIoCompletion() — it can wake up on the freed object. */
++    for (i = 0; i < 100 && !userdata.count; ++i)
++        Sleep(10);
++    ok(userdata.count == 1, "callback ran %u times\n", userdata.count);
++    for (i = 0; i < 100 && HeapValidate(GetProcessHeap(), 0, io); ++i)
++        Sleep(10);
++    ok(!HeapValidate(GetProcessHeap(), 0, io), "object was not freed after the last completion\n");
++    CloseHandle(server);
++    CloseHandle(client);
++
++    /* Cancel drops the expectation. Release may free the object while the
++     * pipe completion is still queued; that packet must not crash. */
++    userdata.count = 0;
++    for (i = 0; i < 40; ++i)
+     {
+-        /* Object destruction will wait until one completion arrives (which was started but not cancelled).
+-         * Commented out to save test time. */
+-        Sleep(1000);
+-        ret = HeapValidate(GetProcessHeap(), 0, io);
+-        ok(ret, "Got unexpected ret %#x.\n", ret);
++        server = CreateNamedPipeA("\\\\.\\pipe\\wine_tp_test",
++                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, 0, 1, 1024, 1024, 0, NULL);
++        ok(server != INVALID_HANDLE_VALUE, "Failed to create server pipe, error %lu.\n", GetLastError());
++        client = CreateFileA("\\\\.\\pipe\\wine_tp_test", GENERIC_READ | GENERIC_WRITE,
++                0, NULL, OPEN_EXISTING, 0, 0);
++        ok(client != INVALID_HANDLE_VALUE, "Failed to create client pipe, error %lu.\n", GetLastError());
++        io = NULL;
++        status = pTpAllocIoCompletion(&io, server, io_cb, &userdata, &environment);
++        ok(!status, "got %#lx\n", status);
++        pTpStartAsyncIoOperation(io);
++        pTpCancelAsyncIoOperation(io);
+         ret = ReadFile(server, in, sizeof(in), NULL, &ovl);
+         ok(!ret, "wrong ret %d\n", ret);
+         ret = WriteFile(client, out, sizeof(out), &ret_size, NULL);
+         ok(ret, "WriteFile() failed, error %lu\n", GetLastError());
+-        Sleep(2000);
+-        ret = HeapValidate(GetProcessHeap(), 0, io);
+-        ok(!ret, "Got unexpected ret %#x.\n", ret);
++        pTpReleaseIoCompletion(io);
++        CloseHandle(server);
++        CloseHandle(client);
+     }
++    Sleep(200);
++    ok(!userdata.count, "callback ran %u times\n", userdata.count);
++
++    /* The completion may already be queued when Cancel and Release run. */
++    for (i = 0; i < 20; ++i)
++    {
++        server = CreateNamedPipeA("\\\\.\\pipe\\wine_tp_test",
++                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, 0, 1, 1024, 1024, 0, NULL);
++        ok(server != INVALID_HANDLE_VALUE, "Failed to create server pipe, error %lu.\n", GetLastError());
++        client = CreateFileA("\\\\.\\pipe\\wine_tp_test", GENERIC_READ | GENERIC_WRITE,
++                0, NULL, OPEN_EXISTING, 0, 0);
++        ok(client != INVALID_HANDLE_VALUE, "Failed to create client pipe, error %lu.\n", GetLastError());
++        io = NULL;
++        status = pTpAllocIoCompletion(&io, server, io_cb, &userdata, &environment);
++        ok(!status, "got %#lx\n", status);
++        pTpStartAsyncIoOperation(io);
++        ret = ReadFile(server, in, sizeof(in), NULL, &ovl);
++        ok(!ret, "wrong ret %d\n", ret);
++        ret = WriteFile(client, out, sizeof(out), &ret_size, NULL);
++        ok(ret, "WriteFile() failed, error %lu\n", GetLastError());
++        pTpCancelAsyncIoOperation(io);
++        pTpReleaseIoCompletion(io);
++        CloseHandle(server);
++        CloseHandle(client);
++    }
++    Sleep(200);
+ 
+-    CloseHandle(server);
+     CloseHandle(ovl.hEvent);
+-    CloseHandle(client);
+     pTpReleasePool(pool);
+ }
+ 
+diff --git a/dlls/ntdll/threadpool.c b/dlls/ntdll/threadpool.c
+index 4f707bd..3ee290e 100644
+--- a/dlls/ntdll/threadpool.c
++++ b/dlls/ntdll/threadpool.c
+@@ -204,6 +204,9 @@ struct threadpool_object
+             /* locked via .pool->cs */
+             unsigned int    pending_count, skipped_count, completion_count, completion_max;
+             BOOL            shutting_down;
++            BOOL            on_queue;
++            BOOL            detached;
++            struct list     ioqueue_entry;
+             struct io_completion *completions;
+         } io;
+     } u;
+@@ -306,11 +309,13 @@ static struct
+     LONG                    objcount;
+     BOOL                    thread_running;
+     HANDLE                  port;
++    struct list             objs;
+     RTL_CONDITION_VARIABLE  update_event;
+ }
+ ioqueue =
+ {
+     .cs = { &ioqueue_debug, -1, 0, 0, 0, 0 },
++    .objs = LIST_INIT( ioqueue.objs ),
+ };
+ 
+ static RTL_CRITICAL_SECTION_DEBUG ioqueue_debug =
+@@ -1526,13 +1531,65 @@ static void tp_waitqueue_unlock( struct threadpool_object *wait )
+     RtlLeaveCriticalSection( &waitqueue.cs );
+ }
+ 
++
++/* ioqueue.cs must be taken before pool->cs. The completion thread and
++ * TpReleaseIoCompletion() both observe a finished object and would otherwise
++ * each drop it. */
++
++static struct threadpool_object *tp_ioqueue_find( ULONG_PTR key )
++{
++    struct list *ptr;
++
++    LIST_FOR_EACH( ptr, &ioqueue.objs )
++    {
++        struct threadpool_object *io = LIST_ENTRY( ptr, struct threadpool_object, u.io.ioqueue_entry );
++
++        if ((ULONG_PTR)io == key)
++            return io;
++    }
++    return NULL;
++}
++
++static void tp_ioqueue_unlist( struct threadpool_object *io )
++{
++    if (!io->u.io.on_queue)
++        return;
++    list_remove( &io->u.io.ioqueue_entry );
++    io->u.io.on_queue = FALSE;
++}
++
++static void tp_ioqueue_drop_count( struct threadpool_object *io )
++{
++    if (io->u.io.detached)
++        return;
++    io->u.io.detached = TRUE;
++    assert( ioqueue.objcount );
++    if (!--ioqueue.objcount)
++        NtSetIoCompletion( ioqueue.port, 0, 0, STATUS_SUCCESS, 0 );
++}
++
++/* Caller holds ioqueue.cs and pool->cs. Returns TRUE when this caller owns
++ * the object's initial reference and must release it. */
++static BOOL tp_io_claim_release( struct threadpool_object *io )
++{
++    if (io->shutdown || !io->u.io.shutting_down)
++        return FALSE;
++    if (io->u.io.pending_count || io->u.io.skipped_count)
++        return FALSE;
++
++    io->shutdown = TRUE;
++    tp_ioqueue_unlist( io );
++    tp_ioqueue_drop_count( io );
++    return TRUE;
++}
++
+ static void CALLBACK ioqueue_thread_proc( void *param )
+ {
+     struct io_completion *completion;
+     struct threadpool_object *io;
+     IO_STATUS_BLOCK iosb;
+     ULONG_PTR key, value;
+-    BOOL destroy, skip;
++    BOOL release;
+     NTSTATUS status;
+ 
+     TRACE( "starting I/O completion thread\n" );
+@@ -1547,42 +1604,25 @@ static void CALLBACK ioqueue_thread_proc( void *param )
+             ERR("NtRemoveIoCompletion failed, status %#lx.\n", status);
+         RtlEnterCriticalSection( &ioqueue.cs );
+ 
+-        destroy = skip = FALSE;
+-        io = (struct threadpool_object *)key;
++        release = FALSE;
++        io = key ? tp_ioqueue_find( key ) : NULL;
+ 
+         TRACE( "io %p, iosb.Status %#lx.\n", io, iosb.Status );
+ 
+-        if (io && (io->shutdown || io->u.io.shutting_down))
++        if (io)
+         {
+             RtlEnterCriticalSection( &io->pool->cs );
+-            if (!io->u.io.pending_count)
++
++            TRACE( "pending_count %u.\n", io->u.io.pending_count );
++
++            if (io->u.io.shutting_down && !io->u.io.pending_count)
+             {
++                /* A cancelled wait still expects this many completions and
++                 * must not run the callback for them. */
+                 if (io->u.io.skipped_count)
+                     --io->u.io.skipped_count;
+-
+-                if (io->u.io.skipped_count)
+-                    skip = TRUE;
+-                else
+-                    destroy = TRUE;
+             }
+-            RtlLeaveCriticalSection( &io->pool->cs );
+-            if (skip) continue;
+-        }
+-
+-        if (destroy)
+-        {
+-            --ioqueue.objcount;
+-            TRACE( "Releasing io %p.\n", io );
+-            io->shutdown = TRUE;
+-            tp_object_release( io );
+-        }
+-        else if (io)
+-        {
+-            RtlEnterCriticalSection( &io->pool->cs );
+-
+-            TRACE( "pending_count %u.\n", io->u.io.pending_count );
+-
+-            if (io->u.io.pending_count)
++            else if (io->u.io.pending_count)
+             {
+                 --io->u.io.pending_count;
+                 if (!array_reserve((void **)&io->u.io.completions, &io->u.io.completion_max,
+@@ -1599,7 +1639,21 @@ static void CALLBACK ioqueue_thread_proc( void *param )
+ 
+                 tp_object_submit( io, FALSE );
+             }
++
++            /* The completion that finishes the last expected operation has
++             * to release the object. TpReleaseIoCompletion() did not, because
++             * the counts were not zero yet. */
++            if (io->u.io.shutting_down && !io->shutdown && !io->u.io.pending_count && !io->u.io.skipped_count)
++                release = tp_io_claim_release( io );
++
+             RtlLeaveCriticalSection( &io->pool->cs );
++
++            if (release)
++            {
++                RtlLeaveCriticalSection( &ioqueue.cs );
++                tp_object_release( io );
++                RtlEnterCriticalSection( &ioqueue.cs );
++            }
+         }
+ 
+         if (!ioqueue.objcount)
+@@ -1662,6 +1716,8 @@ static NTSTATUS tp_ioqueue_lock( struct threadpool_object *io, HANDLE file )
+ 
+     if (status == STATUS_SUCCESS)
+     {
++        list_add_tail( &ioqueue.objs, &io->u.io.ioqueue_entry );
++        io->u.io.on_queue = TRUE;
+         if (!ioqueue.objcount++)
+             RtlWakeConditionVariable( &ioqueue.update_event );
+     }
+@@ -2098,12 +2154,7 @@ static void tp_ioqueue_unlock( struct threadpool_object *io )
+     assert( io->type == TP_OBJECT_TYPE_IO );
+ 
+     RtlEnterCriticalSection( &ioqueue.cs );
+-
+-    assert(ioqueue.objcount);
+-
+-    if (!io->shutdown && !--ioqueue.objcount)
+-        NtSetIoCompletion( ioqueue.port, 0, 0, STATUS_SUCCESS, 0 );
+-
++    tp_ioqueue_drop_count( io );
+     RtlLeaveCriticalSection( &ioqueue.cs );
+ }
+ 
+@@ -2608,7 +2659,12 @@ void WINAPI TpCancelAsyncIoOperation( TP_IO *io )
+ 
+     TRACE("pending_count %u.\n", this->u.io.pending_count);
+ 
+-    this->u.io.pending_count--;
++    /* The completion may already have been dequeued. Decrementing again
++     * wraps the count, and TpReleaseIoCompletion() then never frees the
++     * object. A packet that is still queued sees a zero count and is not
++     * delivered. */
++    if (this->u.io.pending_count)
++        this->u.io.pending_count--;
+     if (object_is_finished( this, TRUE ))
+         RtlWakeAllConditionVariable( &this->group_finished_event );
+     if (object_is_finished( this, FALSE ))
+@@ -2863,6 +2919,16 @@ VOID WINAPI TpReleaseCleanupGroupMembers( TP_CLEANUP_GROUP *group, BOOL cancel_p
+                 tp_object_release( object );
+         }
+ 
++        if (object->type == TP_OBJECT_TYPE_IO)
++        {
++            /* Wait returned, so no callback is running. A completion packet
++             * still sitting on the port must not touch the object after the
++             * final reference is dropped. */
++            RtlEnterCriticalSection( &ioqueue.cs );
++            tp_ioqueue_unlist( object );
++            RtlLeaveCriticalSection( &ioqueue.cs );
++        }
++
+         object->shutdown = TRUE;
+         tp_object_release( object );
+     }
+@@ -2874,21 +2940,22 @@ VOID WINAPI TpReleaseCleanupGroupMembers( TP_CLEANUP_GROUP *group, BOOL cancel_p
+ void WINAPI TpReleaseIoCompletion( TP_IO *io )
+ {
+     struct threadpool_object *this = impl_from_TP_IO( io );
+-    BOOL can_destroy;
++    BOOL release;
+ 
+     TRACE( "%p\n", io );
+ 
++    /* Same lock order as ioqueue_thread_proc(). */
++    RtlEnterCriticalSection( &ioqueue.cs );
+     RtlEnterCriticalSection( &this->pool->cs );
++
+     this->u.io.shutting_down = TRUE;
+-    can_destroy = !this->u.io.pending_count && !this->u.io.skipped_count;
++    release = tp_io_claim_release( this );
++
+     RtlLeaveCriticalSection( &this->pool->cs );
++    RtlLeaveCriticalSection( &ioqueue.cs );
+ 
+-    if (can_destroy)
+-    {
+-        tp_object_prepare_shutdown( this );
+-        this->shutdown = TRUE;
++    if (release)
+         tp_object_release( this );
+-    }
+ }
+ 
+ /***********************************************************************
+diff --git a/dlls/ntdll/unix/coop_proto.h b/dlls/ntdll/unix/coop_proto.h
+new file mode 100644
+index 0000000..d75777e
+--- /dev/null
++++ b/dlls/ntdll/unix/coop_proto.h
+@@ -0,0 +1,62 @@
++#ifndef X87SIDECAR_COOP_PROTO_H
++#define X87SIDECAR_COOP_PROTO_H
++
++// Wire protocol for the cooperative task-port handshake between a tracee (a
++// binary built with the coop handshake shim, or wine with its handshake hook)
++// and the x87sidecar running in `--cooperative` mode.
++//
++// Rendezvous: the sidecar publishes a Mach receive port in the bootstrap
++// namespace under the name "x87sidecar.<tracee-pid>" (see X87_COOP_ENV). The
++// tracee looks it up and sends its own task + thread control ports, then blocks
++// for a reply. This replaces task_for_pid + ptrace(PT_ATTACHEXC), so the
++// sidecar binary needs no com.apple.security.get-task-allow and is notarizable.
++//
++// This header is plain C so the x86_64 test shim (and wine's unix loader) can
++// include it directly.
++//
++// NOTE: this is a VERBATIM copy of x87sidecar's
++// rosetta_loader/src/coop_proto.h. The two must stay byte-for-byte identical —
++// they define opposite ends of the same Mach wire protocol. Update both.
++
++#include <mach/mach.h>
++
++// Environment variable carrying the bootstrap service name to the tracee.
++// The sidecar sets it (via setenv) before forking so it survives the execv.
++#define X87_COOP_ENV "X87_SIDECAR_BOOTSTRAP"
++
++// msgh_id of the handshake request (tracee -> sidecar). The reply uses +1.
++#define X87_COOP_MSGH_ID 0x78383721 /* 'x87!' */
++
++// Request: tracee -> sidecar. Complex message with two port descriptors — the
++// tracee's task control port and the handshake thread's control port, both
++// COPY_SEND. msgh_local_port carries a MAKE_SEND_ONCE reply right that the
++// sidecar answers on to unblock the tracee.
++typedef struct {
++    mach_msg_header_t header;
++    mach_msg_body_t body;
++    mach_msg_port_descriptor_t task_port;
++    mach_msg_port_descriptor_t thread_port;
++} x87_coop_request_t;
++
++// Receive buffer on the sidecar side: request + room for the receive trailer.
++typedef struct {
++    x87_coop_request_t req;
++    mach_msg_trailer_t trailer;
++} x87_coop_request_rcv_t;
++
++// Reply: sidecar -> tracee. Its arrival unblocks the tracee. It also carries up
++// to two code ranges the sidecar patched (the translate_insn entry and the
++// injected handler) so the tracee can invalidate its OWN instruction cache for
++// them. This is required in cooperative mode: unlike the default attach (which
++// patches translate_insn before it has ever executed), the cooperative attach
++// happens post-Rosetta-init, when translate_insn is already hot in the i-cache
++// — and a cross-process mach_vm_machine_attribute flush does not reliably make
++// the patch visible. sys_icache_invalidate() on the tracee's own thread (IC
++// IVAU, broadcast inner-shareable) does. len == 0 means "unused slot".
++typedef struct {
++    mach_msg_header_t header;
++    uint64_t icache_addr[2];
++    uint64_t icache_len[2];
++} x87_coop_reply_t;
++
++#endif  // X87SIDECAR_COOP_PROTO_H
+diff --git a/dlls/ntdll/unix/loader.c b/dlls/ntdll/unix/loader.c
+index 494e056..1b3f483 100644
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -69,6 +69,9 @@
+ # include <mach/mach.h>
+ # include <mach/mach_error.h>
+ # include <mach-o/getsect.h>
++# include <servers/bootstrap.h>
++# include <libkern/OSCacheControl.h>
++# include "coop_proto.h"
+ # include <crt_externs.h>
+ # ifndef _POSIX_SPAWN_DISABLE_ASLR
+ #  define _POSIX_SPAWN_DISABLE_ASLR 0x0100
+@@ -387,13 +390,22 @@ void prepend_dll_path(const char *path)
+ static void set_dll_path(void)
+ {
+     char *p, *path = getenv( "WINEDLLPATH" );
++    char *path_prepend = getenv( "WINEDLLPATH_PREPEND" );
+     int i, count = 0;
+ 
+-    if (path) for (p = path, count = 1; *p; p++) if (*p == ':') count++;
++    if (path) for (p = path, count++; *p; p++) if (*p == ':') count++;
++    if (path_prepend) for (p = path_prepend, count++; *p; p++) if (*p == ':') count++;
+ 
+     dll_paths = malloc( (count + 2) * sizeof(*dll_paths) );
+     count = 0;
+ 
++    if (path_prepend)
++    {
++        path_prepend = strdup( path_prepend );
++        for (p = strtok( path_prepend, ":" ); p; p = strtok( NULL, ":" )) dll_paths[count++] = strdup( p );
++        free( path_prepend );
++    }
++
+     if (!build_dir) dll_paths[count++] = dll_dir;
+ 
+     if (path)
+@@ -524,6 +536,17 @@ char *get_alternate_wineloader( WORD machine )
+     else if (alt_build_dir)
+         asprintf( &ret, "%s/loader/wine", alt_build_dir );
+ 
++    /* Installations without a 32-bit Unix loader (wow64-only builds) have no
++     * i386-unix directory, so the constructed path may not exist. Callers
++     * treat a non-NULL return as proof that another loader must run the
++     * image: loader_exec execs it and env.c falls back to start.exe, which
++     * relaunches the main exe in a detached process. Verify the loader is
++     * actually there so those callers behave as if WINEARCH=wow64 was set. */
++    if (ret && access( ret, X_OK ))
++    {
++        free( ret );
++        ret = NULL;
++    }
+     return ret;
+ }
+ 
+@@ -651,8 +674,31 @@ static void replace_wineloader_path_with_link(char **wineloader_path, const char
+ #endif
+ 
+ 
+-static void preloader_exec( char **argv, const char *image_path )
++/* CW HACK: read the machine field from a PE file's headers.
++ * Returns IMAGE_FILE_MACHINE_UNKNOWN if the file can't be read or isn't PE. */
++static WORD get_pe_file_machine( const char *path )
++{
++    IMAGE_DOS_HEADER dos;
++    IMAGE_FILE_HEADER file_header;
++    DWORD signature;
++    WORD ret = IMAGE_FILE_MACHINE_UNKNOWN;
++    int fd = open( path, O_RDONLY );
++
++    if (fd == -1) return ret;
++    if (pread( fd, &dos, sizeof(dos), 0 ) == sizeof(dos) &&
++        dos.e_magic == IMAGE_DOS_SIGNATURE &&
++        pread( fd, &signature, sizeof(signature), dos.e_lfanew ) == sizeof(signature) &&
++        signature == IMAGE_NT_SIGNATURE &&
++        pread( fd, &file_header, sizeof(file_header),
++               dos.e_lfanew + sizeof(signature) ) == sizeof(file_header))
++        ret = file_header.Machine;
++    close( fd );
++    return ret;
++}
++
++static void preloader_exec( char **argv, const char *image_path, WORD machine )
+ {
++    const char *rosetta_path;
+ #ifdef HAVE_WINE_PRELOADER
+     asprintf( &argv[0], "%s-preloader", argv[1] );
+ #ifdef __APPLE__
+@@ -683,6 +729,62 @@ static void preloader_exec( char **argv, const char *image_path )
+         replace_wineloader_path_with_link( &(argv[1]), image_path );
+ #endif
+ 
++    /* CW HACK: if ROSETTA_X87_PATH is set, re-exec via rosettax87 so its x87 JIT
++     * hook is installed. Only relevant for i386 targets. Note that argv[1] is
++     * always an existing loader here: get_alternate_wineloader() verifies the
++     * path it returns, so loader_exec's speculative first call can't hand us a
++     * nonexistent loader that the sidecar would then fail to exec. */
++    if (machine == IMAGE_FILE_MACHINE_I386 && (rosetta_path = getenv( "ROSETTA_X87_PATH" )))
++    {
++        /* image_path is the wine binary in the early reexec_loader path; try to find
++         * the real Windows EXE in argv, both for a more useful log message and to
++         * check its actual architecture. The machine parameter can't be trusted for
++         * that: reexec_loader forces it to i386 on every launch (to probe for a
++         * 32-bit loader), including launches of 64-bit targets. When the target's
++         * PE header is readable and says it isn't i386, skip the sidecar. When it
++         * isn't readable (builtin name, DOS path from exec_wineloader), fall back
++         * to the machine parameter, which is authoritative in the
++         * exec_wineloader path. */
++        const char *target = image_path;
++        WORD target_machine = IMAGE_FILE_MACHINE_UNKNOWN;
++        int i;
++        for (i = 2; argv[i]; i++)
++        {
++            const char *p = argv[i];
++            size_t len = strlen( p );
++            if (len >= 4 && !strcasecmp( p + len - 4, ".exe" ))
++            {
++                target = p;
++                target_machine = get_pe_file_machine( p );
++                break;
++            }
++        }
++        /* Always run the sidecar in cooperative mode: it attaches via a
++         * voluntary task-port handshake (performed by x87_cooperative_handshake()
++         * in the re-exec'd tracee) instead of task_for_pid + ptrace, so the
++         * sidecar needs no get-task-allow entitlement and the bundle stays
++         * notarizable. Insert "--cooperative" as the first sidecar argument:
++         * [rosettax87, --cooperative, loader, ...]. */
++        if (target_machine == IMAGE_FILE_MACHINE_UNKNOWN ||
++            target_machine == IMAGE_FILE_MACHINE_I386)
++        {
++            static char coop_flag[] = "--cooperative";
++            char **coop_argv;
++            int n;
++
++            /* argv[0] is the (unused, possibly NULL) preloader slot; the real
++             * program + args are argv[1..], so count and copy from index 1. */
++            for (n = 1; argv[n]; n++) {}
++            coop_argv = malloc( (n + 2) * sizeof(*coop_argv) );
++            coop_argv[0] = strdup( rosetta_path );
++            coop_argv[1] = coop_flag;
++            for (i = 1; i <= n; i++) coop_argv[i + 1] = argv[i]; /* copies argv[1..] + NULL terminator */
++            ERR( "ROSETTA_X87_PATH: attaching rosettax87 --cooperative (%s) for %s\n",
++                 rosetta_path, target );
++            execv( coop_argv[0], coop_argv );
++        }
++    }
++
+     execv( argv[1], argv + 1 );
+ }
+ 
+@@ -693,10 +795,10 @@ static NTSTATUS loader_exec( char **argv, WORD machine, const char *image_path )
+ 
+     putenv( noexec );
+ 
+-    if (((argv[1] = get_alternate_wineloader( machine )))) preloader_exec( argv, image_path );
++    if (((argv[1] = get_alternate_wineloader( machine )))) preloader_exec( argv, image_path, machine );
+ 
+     argv[1] = strdup( wineloader );
+-    preloader_exec( argv, image_path );
++    preloader_exec( argv, image_path, machine );
+     return STATUS_INVALID_IMAGE_FORMAT;
+ }
+ 
+@@ -2605,6 +2707,151 @@ static void check_command_line( int argc, char *argv[] )
+ }
+ 
+ 
++#ifdef __APPLE__
++/* CW HACK: tell the user that the x87sidecar did not install its hook. This is
++ * printed unconditionally, so that it shows even with WINEDEBUG=-all. The
++ * sidecar prints a banner with the same "RUNNING WITHOUT X87 ACCELERATION" text
++ * when it gives up on its own side. */
++static void x87_coop_unhooked( const char *reason )
++{
++    fprintf( stderr,
++             "################################################################\n"
++             "WARNING: X87SIDECAR DID NOT FINISH (%s).\n"
++             "THIS PROCESS IS RUNNING WITHOUT X87 ACCELERATION.\n"
++             "32-BIT GAMES THAT USE X87 MATH WILL BE MUCH SLOWER.\n"
++             "################################################################\n",
++             reason );
++}
++
++/***********************************************************************
++ *           x87_cooperative_handshake
++ *
++ * CW HACK: tracee side of the cooperative x87sidecar attach.
++ *
++ * When wine has re-exec'd itself through `x87sidecar --cooperative` (see
++ * preloader_exec / ROSETTA_X87_COOPERATIVE), the sidecar publishes a Mach
++ * receive port in the bootstrap namespace under the name in X87_SIDECAR_BOOTSTRAP
++ * ("x87sidecar.<pid>"). This runs in the Rosetta-translated tracee: look the
++ * service up, hand over our task + main-thread control ports, and block until
++ * the sidecar has installed its x87 JIT hook and replies. The reply carries the
++ * code ranges the sidecar patched so we invalidate our OWN instruction cache for
++ * them: a cross-process flush is not reliable once translate_insn is already
++ * hot. This replaces task_for_pid + ptrace, so the sidecar needs no
++ * com.apple.security.get-task-allow entitlement and the bundle stays notarizable.
++ *
++ * A no-op unless X87_SIDECAR_BOOTSTRAP is set and names THIS pid, so it is inert
++ * in the ordinary (non-cooperative) loader and in unrelated wine processes that
++ * merely inherited the env var. Mirrors x87sidecar tests/coop_handshake.c.
++ */
++static void x87_cooperative_handshake(void)
++{
++    char *name = getenv( X87_COOP_ENV );
++    int verbose = getenv( "X87_LOGS" ) != NULL;
++    mach_port_t bootstrap_port = MACH_PORT_NULL;
++    mach_port_t service = MACH_PORT_NULL;
++    mach_port_t reply = MACH_PORT_NULL;
++    x87_coop_request_t msg;
++    struct {
++        x87_coop_reply_t reply;
++        mach_msg_trailer_t trailer;
++        char slack[64];
++    } rep;
++    kern_return_t kr;
++    char reason[64] = "";
++    char *dot;
++    int i;
++
++    if (!name || !*name) return;  /* not running under --cooperative */
++
++    /* Staleness guard: the service name embeds the intended tracee pid. A
++     * process that merely inherited the env var (the host loader, wineserver,
++     * an unrelated child) must not hand over its own task port. */
++    dot = strrchr( name, '.' );
++    if (!dot || atoi( dot + 1 ) != (int)getpid()) return;
++
++    if ((kr = task_get_bootstrap_port( mach_task_self(), &bootstrap_port )) != KERN_SUCCESS)
++    {
++        snprintf( reason, sizeof(reason), "NO BOOTSTRAP PORT, ERROR 0X%X", kr );
++        goto done;
++    }
++    kr = bootstrap_look_up( bootstrap_port, name, &service );
++    if (kr != KERN_SUCCESS)
++    {
++        ERR( "x87 coop: bootstrap_look_up(%s) failed 0x%x\n", name, kr );
++        snprintf( reason, sizeof(reason), "SIDECAR SERVICE NOT FOUND, ERROR 0X%X", kr );
++        goto done;
++    }
++
++    /* Reply port we block on until the sidecar has finished its setup. */
++    mach_port_allocate( mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &reply );
++
++    memset( &msg, 0, sizeof(msg) );
++    msg.header.msgh_bits = MACH_MSGH_BITS( MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE ) |
++                           MACH_MSGH_BITS_COMPLEX;
++    msg.header.msgh_size = sizeof(msg);
++    msg.header.msgh_remote_port = service;  /* destination: sidecar */
++    msg.header.msgh_local_port = reply;     /* reply right → send-once to sidecar */
++    msg.header.msgh_id = X87_COOP_MSGH_ID;
++    msg.body.msgh_descriptor_count = 2;
++    msg.task_port.name = mach_task_self();
++    msg.task_port.disposition = MACH_MSG_TYPE_COPY_SEND;
++    msg.task_port.type = MACH_MSG_PORT_DESCRIPTOR;
++    msg.thread_port.name = mach_thread_self();
++    msg.thread_port.disposition = MACH_MSG_TYPE_COPY_SEND;
++    msg.thread_port.type = MACH_MSG_PORT_DESCRIPTOR;
++
++    kr = mach_msg( &msg.header, MACH_SEND_MSG, sizeof(msg), 0, MACH_PORT_NULL,
++                   MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL );
++    if (kr != KERN_SUCCESS)
++    {
++        ERR( "x87 coop: handshake send failed 0x%x\n", kr );
++        snprintf( reason, sizeof(reason), "HANDSHAKE SEND FAILED, ERROR 0X%X", kr );
++        goto done;
++    }
++    if (verbose) ERR( "x87 coop: handed over task+thread ports; blocking for reply\n" );
++
++    /* Block until the sidecar has done its install and replies. The receive
++     * buffer needs room for the header AND the kernel-appended trailer. If the
++     * sidecar exits without replying, the kernel sends a MACH_NOTIFY_SEND_ONCE
++     * notification to the reply port instead, which has a different id and
++     * size. */
++    memset( &rep, 0, sizeof(rep) );
++    kr = mach_msg( &rep.reply.header, MACH_RCV_MSG, 0, sizeof(rep), reply,
++                   MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL );
++    if (verbose) ERR( "x87 coop: handshake reply kr=0x%x id=0x%x size=%u\n", kr,
++                      rep.reply.header.msgh_id, rep.reply.header.msgh_size );
++
++    if (kr != KERN_SUCCESS)
++        snprintf( reason, sizeof(reason), "RECEIVE FAILED, ERROR 0X%X", kr );
++    else if (rep.reply.header.msgh_id == MACH_NOTIFY_SEND_ONCE)
++        snprintf( reason, sizeof(reason), "THE SIDECAR EXITED WITHOUT REPLYING" );
++    else if (rep.reply.header.msgh_id != X87_COOP_MSGH_ID + 1 ||
++             rep.reply.header.msgh_size != sizeof(rep.reply))
++        snprintf( reason, sizeof(reason), "UNEXPECTED REPLY, ID 0X%X SIZE %u",
++                  rep.reply.header.msgh_id, rep.reply.header.msgh_size );
++    else
++    {
++        /* Invalidate our own i-cache for the code the sidecar patched. This runs
++         * on the same thread that will execute translate_insn, and
++         * sys_icache_invalidate issues a broadcast (inner-shareable) IC IVAU,
++         * which a cross-process flush from the sidecar does not reliably
++         * achieve once translate_insn is hot. */
++        for (i = 0; i < 2; i++)
++            if (rep.reply.icache_len[i] != 0)
++                sys_icache_invalidate( (void *)(uintptr_t)rep.reply.icache_addr[i],
++                                       (size_t)rep.reply.icache_len[i] );
++    }
++
++done:
++    /* Destroy the reply port, so that a late reply finds no receiver. */
++    if (reply != MACH_PORT_NULL) mach_port_mod_refs( mach_task_self(), reply, MACH_PORT_RIGHT_RECEIVE, -1 );
++    if (service != MACH_PORT_NULL) mach_port_deallocate( mach_task_self(), service );
++    if (reason[0]) x87_coop_unhooked( reason );
++    unsetenv( X87_COOP_ENV );
++}
++#endif
++
++
+ /***********************************************************************
+  *           __wine_main
+  *
+@@ -2615,6 +2862,12 @@ DECLSPEC_EXPORT void __wine_main( int argc, char *argv[] )
+     main_argc = argc;
+     main_argv = argv;
+ 
++#ifdef __APPLE__
++    /* CW HACK: if we were launched under `x87sidecar --cooperative`, hand our
++     * task port to the sidecar and wait for its x87 JIT hook before running. */
++    x87_cooperative_handshake();
++#endif
++
+     init_paths();
+     if (!getenv( "WINELOADERNOEXEC" ) || argc <= 1) check_command_line( argc, argv );
+     unsetenv( "WINELOADERNOEXEC" );
+diff --git a/dlls/ntdll/unix/msync.c b/dlls/ntdll/unix/msync.c
+index ae46bf3..f8f3a01 100644
+--- a/dlls/ntdll/unix/msync.c
++++ b/dlls/ntdll/unix/msync.c
+@@ -377,15 +377,14 @@ static NTSTATUS msync_wait_multiple( const int *objs, void **objs_shm, int alert
+     {
+         if (check_shm_contention( objs_shm, alert_obj_shm, count, tid ))
+         {
+-            int i;
+-            for (i = 0; i < count; i++)
+-            {
+-                struct event *obj = (struct event *)objs_shm[i];
+-
+-                int refs = __atomic_sub_fetch( &obj->multiple_waiters, 1, __ATOMIC_SEQ_CST);
+-                if (refs < 0)
+-                    __atomic_store_n( &obj->multiple_waiters, 0, __ATOMIC_SEQ_CST);
+-            }
++            /* The server still gets the registration sent above and, if nothing it waits
++             * for is signaled by then, keeps this thread on every object's list. Nothing
++             * took it off again, so each lost race leaked list nodes in the wineserver
++             * without bound (pool exhausted, then malloc per wait, gigabytes after hours
++             * of a game that waits on several objects in a hot loop). Unregister like
++             * every other exit does; this also drops the alert object's waiter count,
++             * which the loop here used to leave raised. */
++            server_remove_wait( msgh_id, objs, objs_shm, alert_obj, alert_obj_shm, count );
+             return STATUS_PENDING;
+         }
+     }
+@@ -700,7 +699,16 @@ NTSTATUS msync_set_event_obj( int obj, LONG *prev_state )
+     LONG current;
+ 
+     if (!(current = __atomic_exchange_n( &event->signaled, 1, __ATOMIC_SEQ_CST )))
++    {
+         signal_all( (void *)event, obj );
++        /* Highball: Windows boosts the thread woken by an auto-reset event so it usually runs
++         * before the setter continues. Without that, a setter that signals twice in a row
++         * before the waiter is scheduled loses the second wake-up (the event is already
++         * signaled) and a job hand-off that relies on one wake per signal deadlocks. Seen in
++         * CS:GO's map load on macOS 26 under Rosetta. Yield after the transition so the
++         * waiter gets the CPU first. */
++        if (event->msync_type == MSYNC_AUTO_EVENT) sched_yield();
++    }
+ 
+     if (prev_state) *prev_state = current;
+ 
+diff --git a/dlls/ntdll/unix/process.c b/dlls/ntdll/unix/process.c
+index 1f550a6..86f8934 100644
+--- a/dlls/ntdll/unix/process.c
++++ b/dlls/ntdll/unix/process.c
+@@ -86,6 +86,36 @@ WINE_DEFAULT_DEBUG_CHANNEL(process);
+ 
+ static ULONG execute_flags = MEM_EXECUTE_OPTION_DISABLE;
+ 
++/* Under Rosetta every page that is writable and executable costs a Mach round
++ * trip on first touch, and turning no-execute off makes every readable mapping
++ * executable, so a process that does it crawls. Keep no-execute permanently on
++ * there, as the Windows AlwaysOn policy does. WINE_DISABLE_NX_COMPAT=0 lets a
++ * process turn it off again on any host; any other value keeps it on on every
++ * host. */
++static ULONG get_execute_flags(void)
++{
++    static int always_on = -1;
++
++    if (always_on == -1)
++    {
++        const char *env = getenv( "WINE_DISABLE_NX_COMPAT" );
++
++        if (env) always_on = strcmp( env, "0" ) != 0;
++        else
++        {
++            int translated = 0;
++#ifdef __APPLE__
++            size_t size = sizeof(translated);
++            if (sysctlbyname( "sysctl.proc_translated", &translated, &size, NULL, 0 ) == -1)
++                translated = 0;
++#endif
++            always_on = translated;
++        }
++        if (always_on) TRACE( "no-execute is permanently on\n" );
++    }
++    return always_on ? execute_flags | MEM_EXECUTE_OPTION_PERMANENT : execute_flags;
++}
++
+ static UINT process_error_mode;
+ 
+ /* CrossOver Hack 10523: shunt the loading to CrossOver */
+@@ -1485,6 +1515,9 @@ void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid )
+ #if defined(MACH_TASK_BASIC_INFO)
+     struct mach_task_basic_info info;
+     mach_msg_type_number_t infoCount;
++#ifdef TASK_VM_INFO
++    task_vm_info_data_t vm_info;
++#endif
+ 
+     if (unix_pid != -1) return; /* FIXME: Retrieve information for other processes. */
+ 
+@@ -1496,6 +1529,17 @@ void fill_vm_counters( VM_COUNTERS_EX *pvmi, int unix_pid )
+         pvmi->WorkingSetSize = info.resident_size;
+         pvmi->PeakWorkingSetSize = info.resident_size_max;
+     }
++#ifdef TASK_VM_INFO
++    /* The commit charge is memory the process is charged for, not address space. The footprint
++     * is what the kernel charges the task (dirty and compressed pages), the counterpart of the
++     * RssAnon + VmSwap sum used on Linux. */
++    infoCount = TASK_VM_INFO_COUNT;
++    if (task_info( mach_task_self(), TASK_VM_INFO, (task_info_t)&vm_info, &infoCount ) == KERN_SUCCESS)
++    {
++        pvmi->PagefileUsage = vm_info.phys_footprint;
++        pvmi->PeakPagefileUsage = pvmi->PagefileUsage;
++    }
++#endif
+ #endif
+ }
+ 
+@@ -1970,7 +2014,7 @@ NTSTATUS WINAPI NtQueryInformationProcess( HANDLE handle, PROCESSINFOCLASS class
+                              MEM_EXECUTE_OPTION_DISABLE_THUNK_EMULATION |
+                              MEM_EXECUTE_OPTION_PERMANENT;
+         else
+-            *(ULONG *)info = execute_flags;
++            *(ULONG *)info = get_execute_flags();
+         break;
+ 
+     case ProcessPriorityClass:
+@@ -2257,7 +2301,7 @@ NTSTATUS WINAPI NtSetInformationProcess( HANDLE handle, PROCESSINFOCLASS class,
+ 
+     case ProcessExecuteFlags:
+         if ((is_win64 && !is_wow64()) || size != sizeof(ULONG)) return STATUS_INVALID_PARAMETER;
+-        if (execute_flags & MEM_EXECUTE_OPTION_PERMANENT) return STATUS_ACCESS_DENIED;
++        if (get_execute_flags() & MEM_EXECUTE_OPTION_PERMANENT) return STATUS_ACCESS_DENIED;
+         else
+         {
+             BOOL enable;
+diff --git a/dlls/ntdll/unix/signal_x86_64.c b/dlls/ntdll/unix/signal_x86_64.c
+index 91926a8..a78cb2a 100644
+--- a/dlls/ntdll/unix/signal_x86_64.c
++++ b/dlls/ntdll/unix/signal_x86_64.c
+@@ -508,11 +508,15 @@ struct amd64_thread_data
+     void                **instrumentation_callback; /* 0330 */
+     DWORD                 fs;            /* 0338 WOW TEB selector */
+     DWORD                 mxcsr;         /* 033c Unix-side mxcsr register */
++    DWORD_PTR             host_qos;      /* 0340 macOS: the pthread QoS slot value, %gs:0x20, while PE code owns that slot */
++    DWORD_PTR             host_slot13;   /* 0348 macOS: the pthread TSD slot 13 (libc gmtime key), %gs:0x68, while PE code owns it as LastErrorValue */
+ };
+ 
+ C_ASSERT( sizeof(struct amd64_thread_data) <= sizeof(((struct ntdll_thread_data *)0)->cpu_data) );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, pthread_teb ) == 0x320 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, frame_size ) == 0x328 );
++C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, host_qos ) == 0x340 );
++C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, host_slot13 ) == 0x348 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, instrumentation_callback ) == 0x330 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, fs ) == 0x338 );
+ C_ASSERT( offsetof( TEB, GdiTebBatch ) + offsetof( struct amd64_thread_data, mxcsr ) == 0x33c );
+@@ -1825,6 +1829,14 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
+                    "jz 1f\n\t"
+                    "xchgq %rcx,%r10\n"
+                    "1:\n\t"
++#ifdef __APPLE__
++                   "movq %gs:0x68,%rax\n\t"        /* host slot 13 (libc gmtime key) aside; PE code owns %gs:0x68 as LastErrorValue */
++                   "movq %rax,0x348(%r13)\n\t"
++                   "movl 0x68(%r13),%eax\n\t"      /* teb->LastErrorValue, zero-extended */
++                   "movq %rax,%gs:0x68\n\t"
++                   "movq 0x20(%r13),%rax\n\t"      /* teb->Tib.FiberData: PE code owns %gs:0x20 from here */
++                   "movq %rax,%gs:0x20\n\t"
++#endif
+                    "xor %rbx,%rbx\n\t"
+                    "xor %r12,%r12\n\t"
+                    "xor %r13,%r13\n\t"
+@@ -1839,6 +1851,10 @@ __ASM_GLOBAL_FUNC( call_user_mode_callback,
+ extern void DECLSPEC_NORETURN user_mode_callback_return( void *ret_ptr, ULONG ret_len,
+                                                          NTSTATUS status, TEB *teb );
+ __ASM_GLOBAL_FUNC( user_mode_callback_return,
++#ifdef __APPLE__
++                   "movq 0x340(%rcx),%r10\n\t" /* amd64_thread_data()->host_qos: unix code owns %gs:0x20 again */
++                   "movq %r10,%gs:0x20\n\t"
++#endif
+                    "movq 0x378(%rcx),%r10\n\t" /* thread_data->syscall_frame */
+                    "movq 0xa0(%r10),%r11\n\t"  /* frame->prev_frame */
+                    "movq %r11,0x378(%rcx)\n\t" /* syscall_frame = prev_frame */
+@@ -3076,6 +3092,18 @@ void init_syscall_frame( LPTHREAD_START_ROUTINE entry, void *arg, BOOL suspend,
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Tib.Self), "n" (FIELD_OFFSET(TEB, Tib.Self)));
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->ThreadLocalStoragePointer), "n" (FIELD_OFFSET(TEB, ThreadLocalStoragePointer)));
+     __asm__ volatile ("movq %0,%%gs:%c1" :: "r" (teb->Peb), "n" (FIELD_OFFSET(TEB, Peb)));
++    /* %gs:0x20 is where PE code reads Tib.FiberData (GetCurrentFiber() is an intrinsic), and on
++     * macOS it is the pthread QoS class slot that libdispatch and pthread read. Both cannot hold
++     * the slot at once, so it is swapped at every crossing: unix code gets the host value back
++     * on entry (the dispatchers, user_mode_callback_return), PE code gets Tib.FiberData on
++     * return (__wine_syscall_dispatcher_return, call_user_mode_callback). Keep the host value. */
++    __asm__ volatile ("movq %%gs:%c1,%0" : "=r" (thread_data->host_qos) : "n" (FIELD_OFFSET(TEB, Tib.FiberData)));
++    /* %gs:0x68 is where MSVC-built code reads LastErrorValue directly (Unity's Mono runtime reads it
++     * at 130 sites: File.Delete of a missing file threw "Unknown error (0x80f13910)", The Last
++     * Flame, 2026-09-20). On macOS that is pthread TSD slot 13, libc's gmtime key, so it is
++     * swapped at the same crossings as the QoS slot: PE code sees the TEB's LastErrorValue, and
++     * its value is written back to the TEB on every entry to unix code. Keep the host value. */
++    __asm__ volatile ("movq %%gs:%c1,%0" : "=r" (thread_data->host_slot13) : "n" (FIELD_OFFSET(TEB, LastErrorValue)));
+     thread_data->pthread_teb = mac_thread_gsbase();
+     /* alloc_tls_slot() needs to poke a value to an address relative to each
+        thread's gsbase.  Have each thread record its gsbase pointer into its
+@@ -3227,6 +3255,14 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+                    __ASM_CFI_REG_IS_AT2(rbp, rcx, 0x98, 0x01)
+                    "movq %gs:0x30,%r13\n\t"        /* teb */
+                    "movl %eax,0xb0(%rcx)\n\t"      /* frame->syscall_id */
++#ifdef __APPLE__
++                   "movl %gs:0x68,%r15d\n\t"       /* PE's LastErrorValue back into the TEB */
++                   "movl %r15d,0x68(%r13)\n\t"
++                   "movq 0x348(%r13),%r15\n\t"     /* amd64_thread_data()->host_slot13 */
++                   "movq %r15,%gs:0x68\n\t"        /* unix code sees libc's slot 13 again */
++                   "movq 0x340(%r13),%r15\n\t"     /* amd64_thread_data()->host_qos */
++                   "movq %r15,%gs:0x20\n\t"        /* unix code sees the pthread QoS slot again */
++#endif
+                    /* Legends of Runeterra hooks the first system call return instruction, and
+                     * depends on us returning to it. Adjust the return address accordingly. */
+                    "subq $0xb,0x70(%rcx)\n\t"
+@@ -3335,6 +3371,15 @@ __ASM_GLOBAL_FUNC( __wine_syscall_dispatcher,
+                    __ASM_CFI(".cfi_remember_state\n\t")
+                    __ASM_CFI_CFA_IS_AT2(rcx, 0xa8, 0x01) /* frame->syscall_cfa */
+                    "leaq 0x70(%rcx),%rsp\n\t"      /* %rsp > frame means no longer inside syscall */
++#ifdef __APPLE__
++                   "movq %gs:0x30,%r15\n\t"        /* teb */
++                   "movq %gs:0x68,%rdx\n\t"        /* host slot 13 aside (%rdx is scratch until the restore below) */
++                   "movq %rdx,0x348(%r15)\n\t"
++                   "movl 0x68(%r15),%edx\n\t"      /* teb->LastErrorValue: PE code owns %gs:0x68 again */
++                   "movq %rdx,%gs:0x68\n\t"
++                   "movq 0x20(%r15),%r15\n\t"      /* teb->Tib.FiberData */
++                   "movq %r15,%gs:0x20\n\t"        /* PE code reads GetCurrentFiber() here; %r15 is restored below */
++#endif
+ #ifdef __linux__
+                    "movw 0x338(%r13),%dx\n"        /* amd64_thread_data()->fs */
+                    "testw %dx,%dx\n\t"
+@@ -3546,6 +3591,14 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
+                    "movq %rbp,0x98(%rcx)\n\t"
+                    __ASM_CFI_REG_IS_AT2(rbp, rcx, 0x98, 0x01)
+                    "movq %gs:0x30,%r13\n\t"
++#ifdef __APPLE__
++                   "movl %gs:0x68,%eax\n\t"        /* PE's LastErrorValue back into the TEB; %rax is dead until the call below */
++                   "movl %eax,0x68(%r13)\n\t"
++                   "movq 0x348(%r13),%rax\n\t"     /* amd64_thread_data()->host_slot13 */
++                   "movq %rax,%gs:0x68\n\t"        /* unix code sees libc's slot 13 again */
++                   "movq 0x340(%r13),%rax\n\t"     /* amd64_thread_data()->host_qos */
++                   "movq %rax,%gs:0x20\n\t"        /* unix code sees the pthread QoS slot again */
++#endif
+                    "stmxcsr 0xd8(%rcx)\n\t"        /* frame->xsave.MxCsr */
+                    "movdqa %xmm6,0x1c0(%rcx)\n\t"
+                    "movdqa %xmm7,0x1d0(%rcx)\n\t"
+@@ -3610,6 +3663,14 @@ __ASM_GLOBAL_FUNC( __wine_unix_call_dispatcher,
+                    "jz 1f\n\t"
+                    "movw %dx,%fs\n"
+                    "1:\n\t"
++#endif
++#ifdef __APPLE__
++                   "movq %gs:0x68,%rdx\n\t"        /* host slot 13 aside (%rdx is volatile for the PE caller) */
++                   "movq %rdx,0x348(%r13)\n\t"
++                   "movl 0x68(%r13),%edx\n\t"      /* teb->LastErrorValue: PE code owns %gs:0x68 again */
++                   "movq %rdx,%gs:0x68\n\t"
++                   "movq 0x20(%r13),%rdx\n\t"      /* teb->Tib.FiberData: PE code owns %gs:0x20 again (%rdx is volatile for the PE caller) */
++                   "movq %rdx,%gs:0x20\n\t"
+ #endif
+                    "movq 0x58(%rcx),%r13\n\t"
+                    "movq 0x28(%rcx),%rdi\n\t"
+diff --git a/dlls/ntdll/unix/sync.c b/dlls/ntdll/unix/sync.c
+index b05b91b..eb8ee7f 100644
+--- a/dlls/ntdll/unix/sync.c
++++ b/dlls/ntdll/unix/sync.c
+@@ -1268,7 +1268,14 @@ NTSTATUS WINAPI GPT_IMPORT(NtSetEvent)( HANDLE handle, LONG *prev_state )
+         req->handle = wine_server_obj_handle( handle );
+         req->op     = SET_EVENT;
+         ret = wine_server_call( req );
+-        if (!ret && prev_state) *prev_state = reply->state;
++        if (!ret)
++        {
++            if (prev_state) *prev_state = reply->state;
++            /* Highball: let a thread the server just woke run before we signal again
++             * (see msync_set_event_obj); the server does not tell us the event type, and
++             * the yield is cheap, so it applies to every 0->1 transition here. */
++            if (!reply->state) sched_yield();
++        }
+     }
+     SERVER_END_REQ;
+     return ret;
+diff --git a/dlls/opengl32/unix_wgl.c b/dlls/opengl32/unix_wgl.c
+index 6fd2d0e..e77da1b 100644
+--- a/dlls/opengl32/unix_wgl.c
++++ b/dlls/opengl32/unix_wgl.c
+@@ -961,6 +961,51 @@ static int registry_entry_cmp( const void *a, const void *b )
+     return strcmp( entry_a->name, entry_b->name );
+ }
+ 
++/* GL_ARB_ES2_compatibility's calls. macOS lists that extension only in 4.1 core contexts, but
++ * programs written against OpenGL ES 2 call these in a legacy (2.1) context too, which every
++ * Windows driver allows. The depth calls go through the double precision core ones. */
++static void compat_glClearDepthf( GLfloat d )
++{
++    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
++    funcs->p_glClearDepth( d );
++}
++
++static void compat_glDepthRangef( GLfloat n, GLfloat f )
++{
++    const struct opengl_funcs *funcs = NtCurrentTeb()->glTable;
++    funcs->p_glDepthRange( n, f );
++}
++
++/* What desktop drivers answer: IEEE single precision floats and 32-bit integers. */
++static void compat_glGetShaderPrecisionFormat( GLenum shadertype, GLenum precisiontype, GLint *range, GLint *precision )
++{
++    switch (precisiontype)
++    {
++    case GL_LOW_FLOAT:
++    case GL_MEDIUM_FLOAT:
++    case GL_HIGH_FLOAT:
++        range[0] = range[1] = 127;
++        *precision = 23;
++        break;
++    case GL_LOW_INT:
++    case GL_MEDIUM_INT:
++    case GL_HIGH_INT:
++        range[0] = 31;
++        range[1] = 30;
++        *precision = 0;
++        break;
++    }
++}
++
++static void compat_glReleaseShaderCompiler(void)
++{
++}
++
++/* No binary formats are listed without the extension, so there is nothing to load. */
++static void compat_glShaderBinary( GLsizei count, const GLuint *shaders, GLenum binaryformat, const void *binary, GLsizei length )
++{
++}
++
+ PROC wrap_wglGetProcAddress( TEB *teb, LPCSTR name )
+ {
+     const struct registry_entry entry = {.name = name}, *found;
+@@ -997,6 +1042,22 @@ PROC wrap_wglGetProcAddress( TEB *teb, LPCSTR name )
+                 { "glVertexAttribDivisor", "glVertexAttribDivisorARB"},  /* needed by Caffeine */
+                 { "glCompressedTexImage2DARB", "glCompressedTexImage2D" }, /* needed by Grim Fandango Remastered */
+             };
++            static const struct { const char *name; const void *func; } emulated[] =
++            {
++                { "glClearDepthf", compat_glClearDepthf },  /* needed by Paperback: The Game (Loom) */
++                { "glDepthRangef", compat_glDepthRangef },
++                { "glGetShaderPrecisionFormat", compat_glGetShaderPrecisionFormat },
++                { "glReleaseShaderCompiler", compat_glReleaseShaderCompiler },
++                { "glShaderBinary", compat_glShaderBinary },
++            };
++
++            for (i = 0; i < ARRAY_SIZE(emulated); i++)
++            {
++                if (strcmp( name, emulated[i].name )) continue;
++                WARN( "Extension %s required for %s not supported, emulating it\n", found->extension, name );
++                *func_ptr = emulated[i].func;
++                return (void *)(UINT_PTR)(found - extension_registry);
++            }
+ 
+             for (i = 0; i < ARRAY_SIZE(alternatives); i++)
+             {
+diff --git a/dlls/shell32/shellpath.c b/dlls/shell32/shellpath.c
+index adfa296..f90f1a9 100644
+--- a/dlls/shell32/shellpath.c
++++ b/dlls/shell32/shellpath.c
+@@ -2632,10 +2632,11 @@ static HRESULT _SHExpandEnvironmentStrings(LPCWSTR szSrc, LPWSTR szDest)
+         }
+         else if (!wcsnicmp(szTemp, L"%USERPROFILE%", lstrlenW(L"%USERPROFILE%")))
+         {
+-            /* CrossOver Hack 12735 */
+-            static const WCHAR userName[] = {'c','r','o','s','s','o','v','e','r',0};
++            WCHAR userName[MAX_PATH];
++            DWORD userLen = MAX_PATH;
+ 
+             lstrcpyW(szDest, szProfilesPrefix);
++            GetUserNameW(userName, &userLen);
+             PathAppendW(szDest, userName);
+             PathAppendW(szDest, szTemp + lstrlenW(L"%USERPROFILE%"));
+         }
+diff --git a/dlls/winecoreaudio.drv/coreaudio.c b/dlls/winecoreaudio.drv/coreaudio.c
+index 3199887..2bca6c8 100644
+--- a/dlls/winecoreaudio.drv/coreaudio.c
++++ b/dlls/winecoreaudio.drv/coreaudio.c
+@@ -102,6 +102,13 @@ struct coreaudio_stream
+     INT32 getbuf_last;
+     WAVEFORMATEX *fmt;
+     BYTE *local_buffer, *cap_buffer, *wrap_buffer, *resamp_buffer, *tmp_buffer;
++
++    /* Multichannel output on a device with fewer channels: the stream goes through
++     * AUSpatialMixer, which renders the bed for the Mac's speakers or for headphones. */
++    AudioUnit spatial;
++    float *spatial_buf;
++    UInt32 spatial_frames;
++    int spatial_lfe;       /* channel index of LFE, folded into the front pair on speakers, or -1 */
+ };
+ 
+ static const REFERENCE_TIME def_period = 100000;
+@@ -721,6 +728,217 @@ static AudioDeviceID dev_id_from_device(const char *device)
+     return id;
+ }
+ 
++#define SPATIAL_MAX_FRAMES 4096
++
++static AudioChannelLabel speaker_to_label(DWORD speaker, DWORD mask)
++{
++    BOOL side = (mask & (SPEAKER_SIDE_LEFT | SPEAKER_SIDE_RIGHT)) != 0;
++    switch(speaker){
++    case SPEAKER_FRONT_LEFT: return kAudioChannelLabel_Left;
++    case SPEAKER_FRONT_RIGHT: return kAudioChannelLabel_Right;
++    case SPEAKER_FRONT_CENTER: return kAudioChannelLabel_Center;
++    case SPEAKER_LOW_FREQUENCY: return kAudioChannelLabel_LFEScreen;
++    case SPEAKER_BACK_LEFT: return side ? kAudioChannelLabel_RearSurroundLeft : kAudioChannelLabel_LeftSurround;
++    case SPEAKER_BACK_RIGHT: return side ? kAudioChannelLabel_RearSurroundRight : kAudioChannelLabel_RightSurround;
++    case SPEAKER_FRONT_LEFT_OF_CENTER: return kAudioChannelLabel_LeftCenter;
++    case SPEAKER_FRONT_RIGHT_OF_CENTER: return kAudioChannelLabel_RightCenter;
++    case SPEAKER_BACK_CENTER: return kAudioChannelLabel_CenterSurround;
++    case SPEAKER_SIDE_LEFT: return kAudioChannelLabel_LeftSurround;
++    case SPEAKER_SIDE_RIGHT: return kAudioChannelLabel_RightSurround;
++    case SPEAKER_TOP_CENTER: return kAudioChannelLabel_TopCenterSurround;
++    case SPEAKER_TOP_FRONT_LEFT: return kAudioChannelLabel_LeftTopFront;
++    case SPEAKER_TOP_FRONT_CENTER: return kAudioChannelLabel_CenterTopFront;
++    case SPEAKER_TOP_FRONT_RIGHT: return kAudioChannelLabel_RightTopFront;
++    case SPEAKER_TOP_BACK_LEFT: return kAudioChannelLabel_LeftTopRear;
++    case SPEAKER_TOP_BACK_CENTER: return kAudioChannelLabel_CenterTopRear;
++    case SPEAKER_TOP_BACK_RIGHT: return kAudioChannelLabel_RightTopRear;
++    }
++    return kAudioChannelLabel_Unused;
++}
++
++static UInt32 device_output_channels(AudioDeviceID dev)
++{
++    AudioObjectPropertyAddress addr = { kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput,
++                                        kAudioObjectPropertyElementMain };
++    AudioBufferList *buffers;
++    UInt32 size = 0, i, channels = 0;
++
++    if(AudioObjectGetPropertyDataSize(dev, &addr, 0, NULL, &size) != noErr || !(buffers = malloc(size)))
++        return 0;
++    if(AudioObjectGetPropertyData(dev, &addr, 0, NULL, &size, buffers) == noErr)
++        for(i = 0; i < buffers->mNumberBuffers; i++)
++            channels += buffers->mBuffers[i].mNumberChannels;
++    free(buffers);
++    return channels;
++}
++
++/* Speakers in the Mac itself, headphones (built-in jack, Bluetooth, USB headsets), or anything
++ * else as external speakers. HB_SPATIAL=speakers|headphones|external overrides the guess. */
++static UInt32 spatial_output_type(AudioDeviceID dev)
++{
++    AudioObjectPropertyAddress addr = { kAudioDevicePropertyTransportType, kAudioObjectPropertyScopeGlobal,
++                                        kAudioObjectPropertyElementMain };
++    const char *env = getenv("HB_SPATIAL");
++    UInt32 transport = 0, source = 0, size = sizeof(transport);
++
++    if(env && !strcmp(env, "speakers")) return kSpatialMixerOutputType_BuiltInSpeakers;
++    if(env && !strcmp(env, "headphones")) return kSpatialMixerOutputType_Headphones;
++    if(env && !strcmp(env, "external")) return kSpatialMixerOutputType_ExternalSpeakers;
++
++    AudioObjectGetPropertyData(dev, &addr, 0, NULL, &size, &transport);
++    switch(transport){
++    case kAudioDeviceTransportTypeBuiltIn:
++        addr.mSelector = kAudioDevicePropertyDataSource;
++        addr.mScope = kAudioObjectPropertyScopeOutput;
++        size = sizeof(source);
++        if(AudioObjectGetPropertyData(dev, &addr, 0, NULL, &size, &source) == noErr && source == 'hdpn')
++            return kSpatialMixerOutputType_Headphones;
++        return kSpatialMixerOutputType_BuiltInSpeakers;
++    case kAudioDeviceTransportTypeBluetooth:
++    case kAudioDeviceTransportTypeBluetoothLE:
++    case kAudioDeviceTransportTypeUSB:
++        return kSpatialMixerOutputType_Headphones;
++    default:
++        return kSpatialMixerOutputType_ExternalSpeakers;
++    }
++}
++
++static OSStatus spatial_source_cb(void *user, AudioUnitRenderActionFlags *flags,
++        const AudioTimeStamp *ts, UInt32 bus, UInt32 nframes, AudioBufferList *data)
++{
++    struct coreaudio_stream *stream = user;
++    UInt32 nch = stream->fmt->nChannels, i, c;
++    AudioBufferList interleaved;
++    float *src = stream->spatial_buf;
++
++    if(nframes > stream->spatial_frames) nframes = stream->spatial_frames;
++    interleaved.mNumberBuffers = 1;
++    interleaved.mBuffers[0].mNumberChannels = nch;
++    interleaved.mBuffers[0].mDataByteSize = nframes * stream->fmt->nBlockAlign;
++    interleaved.mBuffers[0].mData = src;
++    ca_render_cb(stream, flags, ts, 0, nframes, &interleaved);
++
++    for(c = 0; c < nch && c < data->mNumberBuffers; c++){
++        float *dst = data->mBuffers[c].mData;
++        for(i = 0; i < nframes; i++) dst[i] = src[i * nch + c];
++    }
++    if(stream->spatial_lfe >= 0 && data->mNumberBuffers >= 2){
++        float *l = data->mBuffers[0].mData, *r = data->mBuffers[1].mData, *lfe = data->mBuffers[stream->spatial_lfe].mData;
++        for(i = 0; i < nframes; i++){ l[i] += 0.5f * lfe[i]; r[i] += 0.5f * lfe[i]; lfe[i] = 0.0f; }
++    }
++    return noErr;
++}
++
++static OSStatus spatial_pull_cb(void *user, AudioUnitRenderActionFlags *flags,
++        const AudioTimeStamp *ts, UInt32 bus, UInt32 nframes, AudioBufferList *data)
++{
++    struct coreaudio_stream *stream = user;
++    return AudioUnitRender(stream->spatial, flags, ts, 0, nframes, data);
++}
++
++/* Puts AUSpatialMixer between the stream and the device when the stream is a float bed with more
++ * channels than the device. Returns FALSE (and leaves the unit as it was) when it does not apply. */
++static BOOL spatial_setup(struct coreaudio_stream *stream)
++{
++    const WAVEFORMATEXTENSIBLE *fmtex = (const WAVEFORMATEXTENSIBLE *)stream->fmt;
++    AudioComponentDescription desc = { kAudioUnitType_Mixer, kAudioUnitSubType_SpatialMixer, kAudioUnitManufacturer_Apple };
++    AudioStreamBasicDescription in, out;
++    AudioChannelLayout *layout;
++    AURenderCallbackStruct cb;
++    UInt32 nch = stream->fmt->nChannels, one = 1, algo, mode, type, frames = SPATIAL_MAX_FRAMES, i, bit, dev_ch;
++    DWORD mask;
++    size_t layout_size;
++    AudioComponent comp;
++    const char *env = getenv("HB_SPATIAL");
++    OSStatus sc;
++
++    if(env && !strcmp(env, "0")) return FALSE;
++    if(stream->fmt->wFormatTag != WAVE_FORMAT_EXTENSIBLE || !IsEqualGUID(&fmtex->SubFormat, &KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) ||
++       stream->fmt->wBitsPerSample != 32 || nch < 3)
++        return FALSE;
++    mask = fmtex->dwChannelMask;
++    if((UInt32)__builtin_popcount(mask) != nch || !(mask & ~(SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY)))
++        return FALSE;
++    dev_ch = device_output_channels(stream->dev_id);
++    if(!dev_ch || dev_ch >= nch) return FALSE;
++    if(!(comp = AudioComponentFindNext(NULL, &desc)) || AudioComponentInstanceNew(comp, &stream->spatial) != noErr){
++        stream->spatial = NULL;
++        return FALSE;
++    }
++
++    memset(&in, 0, sizeof(in));
++    in.mSampleRate = stream->fmt->nSamplesPerSec;
++    in.mFormatID = kAudioFormatLinearPCM;
++    in.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked | kAudioFormatFlagIsNonInterleaved;
++    in.mBytesPerPacket = in.mBytesPerFrame = 4;
++    in.mFramesPerPacket = 1;
++    in.mChannelsPerFrame = nch;
++    in.mBitsPerChannel = 32;
++    out = in;
++    out.mChannelsPerFrame = 2;
++
++    layout_size = offsetof(AudioChannelLayout, mChannelDescriptions) + nch * sizeof(AudioChannelDescription);
++    layout = calloc(1, layout_size);
++    layout->mChannelLayoutTag = kAudioChannelLayoutTag_UseChannelDescriptions;
++    layout->mNumberChannelDescriptions = nch;
++    stream->spatial_lfe = -1;
++    for(i = 0, bit = 1; bit && i < nch; bit <<= 1){
++        if(!(mask & bit)) continue;
++        if(bit == SPEAKER_LOW_FREQUENCY) stream->spatial_lfe = i;
++        layout->mChannelDescriptions[i++].mChannelLabel = speaker_to_label(bit, mask);
++    }
++
++    type = spatial_output_type(stream->dev_id);
++    algo = kSpatializationAlgorithm_UseOutputType;
++    mode = kSpatialMixerSourceMode_AmbienceBed;
++    if(type != kSpatialMixerOutputType_BuiltInSpeakers) stream->spatial_lfe = -1;
++
++    if((sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_ElementCount, kAudioUnitScope_Input, 0, &one, sizeof(one))) ||
++       (sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_MaximumFramesPerSlice, kAudioUnitScope_Global, 0, &frames, sizeof(frames))) ||
++       (sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &in, sizeof(in))) ||
++       (sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_AudioChannelLayout, kAudioUnitScope_Input, 0, layout, layout_size)) ||
++       (sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0, &out, sizeof(out))) ||
++       (sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_SpatializationAlgorithm, kAudioUnitScope_Input, 0, &algo, sizeof(algo))) ||
++       (sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_SpatialMixerSourceMode, kAudioUnitScope_Input, 0, &mode, sizeof(mode))) ||
++       (sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_SpatialMixerOutputType, kAudioUnitScope_Global, 0, &type, sizeof(type)))){
++        WARN("spatial mixer setup failed: %d\n", (int)sc);
++        goto fail;
++    }
++    free(layout);
++    layout = NULL;
++
++    cb.inputProc = spatial_source_cb;
++    cb.inputProcRefCon = stream;
++    if((sc = AudioUnitSetProperty(stream->spatial, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &cb, sizeof(cb))) ||
++       (sc = AudioUnitInitialize(stream->spatial))){
++        WARN("spatial mixer start failed: %d\n", (int)sc);
++        goto fail;
++    }
++
++    if((sc = AudioUnitSetProperty(stream->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &out, sizeof(out)))){
++        WARN("couldn't give the device a stereo stream: %d\n", (int)sc);
++        goto fail;
++    }
++
++    stream->spatial_frames = SPATIAL_MAX_FRAMES;
++    stream->spatial_buf = malloc(SPATIAL_MAX_FRAMES * stream->fmt->nBlockAlign);
++    if(!stream->spatial_buf) goto fail;
++
++    MESSAGE("winecoreaudio: %u-channel stream (mask %#x) rendered by AUSpatialMixer for %s on a %u-channel device\n",
++            (unsigned)nch, (unsigned)mask,
++            type == kSpatialMixerOutputType_BuiltInSpeakers ? "built-in speakers" :
++            type == kSpatialMixerOutputType_Headphones ? "headphones" : "external speakers", (unsigned)dev_ch);
++    return TRUE;
++
++fail:
++    free(layout);
++    AudioComponentInstanceDispose(stream->spatial);
++    stream->spatial = NULL;
++    /* put the device unit back on the stream's own format */
++    AudioUnitSetProperty(stream->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &stream->dev_desc, sizeof(stream->dev_desc));
++    return FALSE;
++}
++
+ static NTSTATUS unix_create_stream(void *args)
+ {
+     struct create_stream_params *params = args;
+@@ -767,7 +985,7 @@ static NTSTATUS unix_create_stream(void *args)
+         sc = AudioUnitSetProperty(stream->unit, kAudioOutputUnitProperty_SetInputCallback,
+                                   kAudioUnitScope_Output, 1, &input, sizeof(input));
+     }else{
+-        input.inputProc = ca_render_cb;
++        input.inputProc = spatial_setup(stream) ? spatial_pull_cb : ca_render_cb;
+         sc = AudioUnitSetProperty(stream->unit, kAudioUnitProperty_SetRenderCallback,
+                                   kAudioUnitScope_Input, 0, &input, sizeof(input));
+     }
+@@ -793,6 +1011,32 @@ static NTSTATUS unix_create_stream(void *args)
+                            "This can be enabled under Security & Privacy in System Preferences.\n");
+     }
+ 
++    if(stream->flow == eRender){
++        /* Highball: keep each pull from the device under half a period. The device asks for
++         * its whole I/O buffer at once, 512 frames by default, which at 48 kHz is 10.7 ms,
++         * longer than the 10 ms period a shared-mode client is woken for. A game that keeps
++         * about one period queued (Counter-Strike 2) then had too little at most pulls, and
++         * the rest of the pull was played as silence: 324 dropouts of about 8 ms in two minutes
++         * of its menu music on an M4 at 48 kHz, none at 96 kHz where the same 512 frames last
++         * 5.3 ms (highball#127). The buffer size is per process, so other apps keep theirs. */
++        AudioStreamBasicDescription hw;
++        UInt32 hw_size = sizeof(hw), cur = 0, cur_size = sizeof(cur), frames;
++        if(AudioUnitGetProperty(stream->unit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Output, 0,
++                                &hw, &hw_size) == noErr && hw.mSampleRate > 0 &&
++           AudioUnitGetProperty(stream->unit, kAudioDevicePropertyBufferFrameSize, kAudioUnitScope_Global, 0,
++                                &cur, &cur_size) == noErr){
++            frames = muldiv(stream->period / 2, (int)hw.mSampleRate, 10000000);
++            if(frames > 0 && cur > frames){
++                sc = AudioUnitSetProperty(stream->unit, kAudioDevicePropertyBufferFrameSize, kAudioUnitScope_Global, 0,
++                                          &frames, sizeof(frames));
++                if(sc != noErr)
++                    WARN("Couldn't set the I/O buffer to %u frames: %x\n", (unsigned)frames, (int)sc);
++                else
++                    TRACE("I/O buffer %u -> %u frames at %u Hz\n", (unsigned)cur, (unsigned)frames, (unsigned)hw.mSampleRate);
++            }
++        }
++    }
++
+     sc = AudioUnitInitialize(stream->unit);
+     if(sc != noErr){
+         WARN("Couldn't initialize: %x\n", (int)sc);
+@@ -827,6 +1071,8 @@ end:
+     if(FAILED(params->result)){
+         if(stream->converter) AudioConverterDispose(stream->converter);
+         if(stream->unit) AudioComponentInstanceDispose(stream->unit);
++        if(stream->spatial) AudioComponentInstanceDispose(stream->spatial);
++        free(stream->spatial_buf);
+         free(stream->fmt);
+         free(stream);
+     } else {
+@@ -853,6 +1099,10 @@ static NTSTATUS unix_release_stream( void *args )
+         AudioOutputUnitStop(stream->unit);
+         AudioComponentInstanceDispose(stream->unit);
+     }
++    if(stream->spatial){
++        AudioComponentInstanceDispose(stream->spatial);
++        free(stream->spatial_buf);
++    }
+ 
+     if(stream->converter) AudioConverterDispose(stream->converter);
+     free(stream->resamp_buffer);
+diff --git a/dlls/wined3d/directx.c b/dlls/wined3d/directx.c
+index 9cce5c7..c9b8bde 100644
+--- a/dlls/wined3d/directx.c
++++ b/dlls/wined3d/directx.c
+@@ -3528,12 +3528,13 @@ static struct wined3d_adapter *wined3d_adapter_create(unsigned int ordinal, DWOR
+     if (wined3d_settings.renderer == WINED3D_RENDERER_OPENGL)
+         return wined3d_adapter_gl_create(ordinal, wined3d_creation_flags);
+ 
+-    /* CW HACK 18311: Use the Vulkan renderer on macOS. */
+-    if ((adapter = wined3d_adapter_vk_create(ordinal, wined3d_creation_flags)))
+-        ERR_(winediag)("Using the Vulkan renderer for d3d10/11 applications.\n");
+-
+-    if (!adapter)
+-        adapter = wined3d_adapter_gl_create(ordinal, wined3d_creation_flags);
++    /* Highball: upstream's choice for the automatic renderer, OpenGL, instead of CrossOver's
++     * Vulkan-first hack 18311. On MoltenVK the Vulkan adapter is created and then fails the
++     * Direct3D 11 feature checks, which took 32-bit launchers (Warframe's) and Rockstar's
++     * launcher down; Sikarugir's engines behave as upstream here. renderer=vulkan in
++     * WINE_D3D_CONFIG or the registry still selects it explicitly. */
++    if (!(adapter = wined3d_adapter_gl_create(ordinal, wined3d_creation_flags)))
++        adapter = wined3d_adapter_vk_create(ordinal, wined3d_creation_flags);
+ 
+     return adapter;
+ }
+diff --git a/dlls/winemac.drv/cocoa_window.m b/dlls/winemac.drv/cocoa_window.m
+index ffb7c6a..f7fbf02 100644
+--- a/dlls/winemac.drv/cocoa_window.m
++++ b/dlls/winemac.drv/cocoa_window.m
+@@ -46,6 +46,27 @@ - (void)_setPreventsActivation:(BOOL)flag;
+ 
+ @end
+ 
++/* Highball: private CoreAnimation API used to host a layer rendered by another process
++ * (Wine bug 60263). Backported from upstream Wine 11.11+ (dlls/winemac.drv/cocoa_window.m). */
++typedef uint32_t CGSConnectionID;
++extern CGSConnectionID CGSMainConnectionID(void);
++
++typedef uint32_t CAContextID;
++
++@interface CAContext : NSObject
++
+++ (id) contextWithCGSConnection:(CGSConnectionID)connection options:(NSDictionary*)options;
++@property(readonly) CAContextID contextId;
++@property(retain) CALayer* layer;
++
++@end
++
++@interface CALayerHost : CALayer
++
++- (void) setContextId:(CAContextID)contextId;
++
++@end
++
+ 
+ static NSUInteger style_mask_for_features(const struct macdrv_window_features* wf)
+ {
+@@ -375,6 +396,7 @@ @interface WineContentView : WineBaseView <NSTextInputClient, NSViewLayerContent
+     int backingSize[2];
+ 
+     WineMetalView *_metalView;
++    NSMutableDictionary<NSNumber*, CALayerHost*>* _caLayerHosts;   /* Highball: Wine bug 60263 */
+ 
+ @public void *d3dmetal_client_surface;   /* CW HACK 22435 */
+ }
+@@ -389,6 +411,10 @@ - (void) wine_getBackingSize:(int*)outBackingSize;
+     - (void) wine_setBackingSize:(const int*)newBackingSize;
+ 
+     - (WineMetalView*) newMetalViewWithDevice:(id<MTLDevice>)device;
++    - (void) addCALayerHostViewWithContextId:(CAContextID)contextId frame:(CGRect)frame;
++    - (void) updateCALayerHostFrame:(CAContextID)contextId frame:(CGRect)frame;
++    - (void) setCALayerHostZPosition:(CAContextID)contextId zPosition:(double)zpos;
++    - (void) removeCALayerHostView:(CAContextID)contextId;
+ 
+ @end
+ 
+@@ -477,6 +503,35 @@ - (NSFocusRingType) focusRingType
+ @end
+ 
+ 
++/* Highball: Win32 speaks raw pixels and Cocoa points (two to one on Retina), so an odd pixel
++ * dimension is a half point, and a hosted layer that Win32 says reaches the window edge stops one
++ * device pixel short of it, showing the window beneath as a hairline. Snapped only at the edges so
++ * an interior sibling keeps its exact geometry. */
++static CGRect snap_host_frame_to_view_edges(CGRect frame, CGRect view)
++{
++    /* one device pixel in points; a fixed 1.0 would also close a gap the app asked for */
++    const CGFloat px = retina_on ? 0.5 : 1.0;
++
++    if (CGRectIsNull(frame) || CGRectIsEmpty(frame) || CGRectIsEmpty(view)) return frame;
++
++    if (frame.origin.x > 0.0 && frame.origin.x <= px)
++    {
++        frame.size.width += frame.origin.x;
++        frame.origin.x = 0.0;
++    }
++    if (frame.origin.y > 0.0 && frame.origin.y <= px)
++    {
++        frame.size.height += frame.origin.y;
++        frame.origin.y = 0.0;
++    }
++    if (CGRectGetMaxX(frame) >= view.size.width - px)
++        frame.size.width = view.size.width - frame.origin.x;
++    if (CGRectGetMaxY(frame) >= view.size.height - px)
++        frame.size.height = view.size.height - frame.origin.y;
++    return frame;
++}
++
++
+ @implementation WineContentView
+ 
+ @synthesize everHadGLContext = _everHadGLContext;
+@@ -499,6 +554,7 @@ - (void) dealloc
+         [markedText release];
+         [glContexts release];
+         [pendingGlContexts release];
++        [_caLayerHosts release];
+         CGImageRelease(colorImage);
+         CGImageRelease(shapeImage);
+         [super dealloc];
+@@ -702,6 +758,97 @@ - (WineMetalView*) newMetalViewWithDevice:(id<MTLDevice>)device
+         return _metalView;
+     }
+ 
++    /* Highball: host a layer another process renders into, keyed by its CAContext id
++     * (Wine bug 60263). frame is in points, in this view's coordinate space; CGRectNull means
++     * "no child rect supplied" and fills the view, which is the top-level window case. */
++    - (void) addCALayerHostViewWithContextId:(CAContextID)contextId frame:(CGRect)frame
++    {
++        if (!_caLayerHosts)
++            _caLayerHosts = [[NSMutableDictionary alloc] init];
++
++        [self removeCALayerHostView:contextId];
++
++        CALayerHost* host = [CALayerHost layer];
++        [host setContextId:contextId];
++        host.magnificationFilter = kCAFilterNearest;
++        host.contentsScale = retina_on ? 2.0 : 1.0;
++        frame = snap_host_frame_to_view_edges(frame, self.layer.bounds);
++        /* A host given a real child rect is positioned and clipped to it, so siblings on one
++         * window stop occluding one another. Three cases: CGRectIsEmpty cannot tell "no rect
++         * supplied" from "really 0x0", and a 0x0 layer stretched over the content view with
++         * nothing drawn in it blacks out everything below; a window with no area is hidden. */
++        if (CGRectIsNull(frame))
++        {
++            host.frame = self.layer.bounds;
++            host.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
++        }
++        else if (CGRectIsEmpty(frame))
++        {
++            host.frame = CGRectZero;
++            host.masksToBounds = YES;
++            host.hidden = YES;
++        }
++        else
++        {
++            host.frame = frame;
++            host.masksToBounds = YES;
++        }
++
++        [self.layer addSublayer:host];
++        [_caLayerHosts setObject:host forKey:@(contextId)];
++
++        [(WineWindow*)self.window windowDidDrawContent];
++    }
++
++    - (void) updateCALayerHostFrame:(CAContextID)contextId frame:(CGRect)frame
++    {
++        CALayerHost* host = [_caLayerHosts objectForKey:@(contextId)];
++
++        if (!host || CGRectIsNull(frame)) return;
++        frame = snap_host_frame_to_view_edges(frame, self.layer.bounds);
++        [CATransaction begin];
++        [CATransaction setDisableActions:YES];
++        if (CGRectIsEmpty(frame))
++        {
++            /* Became 0x0 while hosted: left alone, the layer keeps its last size and still
++             * covers live content. */
++            host.hidden = YES;
++            host.frame = CGRectZero;
++        }
++        else
++        {
++            /* The child it mirrors can move or resize in the other process. Visibility and
++             * geometry are independent: a window that reports 0x0 and returns to its old size
++             * must come back. */
++            if (!CGRectEqualToRect(host.frame, frame)) host.frame = frame;
++            if (host.hidden) host.hidden = NO;
++        }
++        [CATransaction commit];
++    }
++
++    /* Stack the hosted layers the way the windows they mirror stack: insertion order is not that
++     * order, since a client that recreates a swapchain on every resize puts the last-recreated
++     * layer on top of live content. */
++    - (void) setCALayerHostZPosition:(CAContextID)contextId zPosition:(double)zpos
++    {
++        CALayerHost* host = [_caLayerHosts objectForKey:@(contextId)];
++
++        if (host && host.zPosition != zpos)
++        {
++            [CATransaction begin];
++            [CATransaction setDisableActions:YES];
++            host.zPosition = zpos;
++            [CATransaction commit];
++        }
++    }
++
++    - (void) removeCALayerHostView:(CAContextID)contextId
++    {
++        NSNumber* key = @(contextId);
++        [[_caLayerHosts objectForKey:key] removeFromSuperlayer];
++        [_caLayerHosts removeObjectForKey:key];
++    }
++
+     - (void) setLayerRetinaProperties:(BOOL)mode
+     {
+         [self layer].contentsScale = mode ? 2.0 : 1.0;
+@@ -741,6 +888,9 @@ - (void) setRetinaMode:(BOOL)mode
+         [self updateGLContexts];
+         [self setLayerRetinaProperties:mode];
+ 
++        for (CALayerHost* host in [_caLayerHosts allValues])
++            host.contentsScale = mode ? 2.0 : 1.0;
++
+         [super setRetinaMode:mode];
+     }
+ 
+@@ -4067,6 +4217,246 @@ void macdrv_view_release_metal_view(macdrv_metal_view v)
+     });
+ }
+ 
++/* Highball: Metal swapchains (Wine bug 60263). Backported from upstream Wine 11.11+, with the
++ * child-window geometry and z-order from the bug's reference patch. A MetalViewSwapChain is the
++ * in-process case, a WineMetalView in one of our views. A CAContextSwapChain is the cross-process
++ * case: the CAMetalLayer is exported through a CAContext and the process owning the target
++ * window hosts it in its content view through a CALayerHost. */
++
++@protocol WineMetalSwapChain <NSObject>
++
++- (CAMetalLayer*) layer;
++
++@end
++
++@interface MetalViewSwapChain : NSObject <WineMetalSwapChain>
++{
++    macdrv_metal_device device;
++    macdrv_metal_view metal_view;
++}
++
++- (instancetype) initWithView:(macdrv_view)view device:(macdrv_metal_device)dev;
++
++@end
++
++@implementation MetalViewSwapChain
++
++- (instancetype) initWithView:(macdrv_view)view device:(macdrv_metal_device)dev
++{
++    self = [super init];
++    if (!self) return nil;
++
++    /* The renderer's own device when it hands one over (D3DMetal, DXMT), the system default
++     * otherwise (Vulkan). Either way one reference is ours to release. */
++    if (dev)
++        device = (macdrv_metal_device)[(id<MTLDevice>)dev retain];
++    else if (!(device = macdrv_create_metal_device()))
++    {
++        [self release];
++        return nil;
++    }
++    if (!(metal_view = macdrv_view_create_metal_view(view, device)))
++    {
++        macdrv_release_metal_device(device);
++        device = NULL;
++        [self release];
++        return nil;
++    }
++    return self;
++}
++
++- (CAMetalLayer*) layer
++{
++    return (CAMetalLayer*)macdrv_view_get_metal_layer(metal_view);
++}
++
++- (void) dealloc
++{
++    if (metal_view) macdrv_view_release_metal_view(metal_view);
++    if (device) macdrv_release_metal_device(device);
++    [super dealloc];
++}
++
++@end
++
++@interface CAContextSwapChain : NSObject <WineMetalSwapChain>
++{
++    void* hwnd;                /* the window whose owner hosts the layer */
++    void* child_hwnd;          /* the cross-process child this layer belongs to (may be NULL) */
++    macdrv_metal_device device;
++    CAMetalLayer* offscreen_layer;
++    CAContext* remote_context;
++    CAContextID context_id;
++}
++
++- (instancetype) initWithHwnd:(void*)hwnd child:(void*)child bounds:(CGRect)bounds
++                       device:(macdrv_metal_device)dev;
++
++@end
++
++@implementation CAContextSwapChain
++
++- (instancetype) initWithHwnd:(void*)newHwnd child:(void*)newChild bounds:(CGRect)bounds
++                       device:(macdrv_metal_device)dev
++{
++    self = [super init];
++    if (!self) return nil;
++
++    hwnd = newHwnd;
++    child_hwnd = newChild;
++    if (dev)
++        device = (macdrv_metal_device)[(id<MTLDevice>)dev retain];
++    else if (!(device = macdrv_create_metal_device()))
++    {
++        [self release];
++        return nil;
++    }
++
++    offscreen_layer = [[CAMetalLayer alloc] init];
++    if (!offscreen_layer)
++    {
++        macdrv_release_metal_device(device);
++        device = NULL;
++        [self release];
++        return nil;
++    }
++
++    offscreen_layer.device = (id<MTLDevice>)device;
++    offscreen_layer.framebufferOnly = YES;
++    offscreen_layer.magnificationFilter = kCAFilterNearest;
++    offscreen_layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
++    offscreen_layer.contentsScale = retina_on ? 2.0 : 1.0;
++    [offscreen_layer setBounds:cgrect_mac_from_win(bounds)];
++    [offscreen_layer setAnchorPoint:CGPointMake(0, 0)];
++
++    /* Export the CAMetalLayer from the rendering process, then have the
++     * target HWND's owner host it using CALayerHost. */
++    OnMainThread(^{
++        remote_context = [[CAContext contextWithCGSConnection:CGSMainConnectionID()
++                                                      options:[NSDictionary dictionary]] retain];
++        [remote_context setLayer:offscreen_layer];
++        context_id = [remote_context contextId];
++    });
++
++    if (!remote_context || !context_id)
++    {
++        [self release];
++        return nil;
++    }
++
++    macdrv_create_remote_layer(hwnd, child_hwnd, context_id);
++    return self;
++}
++
++- (CAMetalLayer*) layer
++{
++    return offscreen_layer;
++}
++
++- (void) dealloc
++{
++    if (context_id) macdrv_release_remote_layer(hwnd, context_id);
++    CAContext *context = remote_context;
++    CAMetalLayer *layer = offscreen_layer;
++    macdrv_metal_device dev = device;
++
++    OnMainThreadAsync(^{
++        [context setLayer:nil];
++        [context release];
++        [layer release];
++        if (dev) macdrv_release_metal_device(dev);
++    });
++
++    [super dealloc];
++}
++
++@end
++
++macdrv_metal_swapchain macdrv_create_view_swapchain(macdrv_view v, macdrv_metal_device device)
++{
++    return (macdrv_metal_swapchain)[[MetalViewSwapChain alloc] initWithView:v device:device];
++}
++
++macdrv_metal_swapchain macdrv_create_offscreen_swapchain(void* hwnd, void* child, CGRect bounds,
++                                                         macdrv_metal_device device)
++{
++    return (macdrv_metal_swapchain)[[CAContextSwapChain alloc] initWithHwnd:hwnd child:child
++                                                                        bounds:bounds device:device];
++}
++
++macdrv_metal_layer macdrv_swapchain_get_layer(macdrv_metal_swapchain swapchain)
++{
++    return (macdrv_metal_layer)[(id<WineMetalSwapChain>)swapchain layer];
++}
++
++void macdrv_destroy_swapchain(macdrv_metal_swapchain swapchain)
++{
++    [(id<WineMetalSwapChain>)swapchain release];
++}
++
++/* The frame arrives in Win32 raw pixels relative to the content view and CALayer.frame is in
++ * points: window.c works in Win32 space and the Cocoa side converts. A null frame (no child rect)
++ * stays null and selects the whole-view case. */
++void macdrv_window_create_ca_layer_host_view(macdrv_window w, unsigned int context_id,
++                                             CGRect frame, double zpos, int zpos_valid)
++{
++@autoreleasepool
++{
++    WineWindow* window = (WineWindow*)w;
++
++    OnMainThread(^{
++        NSView* content_view = [window contentView];
++
++        if ([content_view isKindOfClass:[WineContentView class]])
++        {
++            CGRect mac_frame = CGRectIsNull(frame) ? CGRectNull : cgrect_mac_from_win(frame);
++
++            [(WineContentView*)content_view addCALayerHostViewWithContextId:context_id
++                                                                      frame:mac_frame];
++            if (zpos_valid)
++                [(WineContentView*)content_view setCALayerHostZPosition:context_id zPosition:zpos];
++        }
++    });
++}
++}
++
++void macdrv_window_update_ca_layer_host_frame(macdrv_window w, unsigned int context_id,
++                                              CGRect frame, double zpos, int zpos_valid)
++{
++@autoreleasepool
++{
++    WineWindow* window = (WineWindow*)w;
++
++    OnMainThread(^{
++        NSView* content_view = [window contentView];
++
++        if ([content_view isKindOfClass:[WineContentView class]])
++        {
++            CGRect mac_frame = CGRectIsNull(frame) ? CGRectNull : cgrect_mac_from_win(frame);
++
++            [(WineContentView*)content_view updateCALayerHostFrame:context_id frame:mac_frame];
++            if (zpos_valid)
++                [(WineContentView*)content_view setCALayerHostZPosition:context_id zPosition:zpos];
++        }
++    });
++}
++}
++
++void macdrv_window_release_ca_layer_host_view(macdrv_window w, unsigned int context_id)
++{
++@autoreleasepool
++{
++    WineWindow* window = (WineWindow*)w;
++
++    OnMainThread(^{
++        NSView* content_view = [window contentView];
++
++        if ([content_view isKindOfClass:[WineContentView class]])
++            [(WineContentView*)content_view removeCALayerHostView:context_id];
++    });
++}
++}
++
+ bool macdrv_get_view_backing_size(macdrv_view v, int backing_size[2])
+ {
+     WineContentView* view = (WineContentView*)v;
+diff --git a/dlls/winemac.drv/d3dmetal.c b/dlls/winemac.drv/d3dmetal.c
+index b003607..9454d2d 100644
+--- a/dlls/winemac.drv/d3dmetal.c
++++ b/dlls/winemac.drv/d3dmetal.c
+@@ -26,6 +26,8 @@
+ 
+ #include "config.h"
+ 
++#include <pthread.h>
++
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+ #include "macdrv.h"
+@@ -92,6 +94,122 @@ C_ASSERT(sizeof(struct d3dmetal_macdrv_win_data) == 120);
+ void OnMainThread(dispatch_block_t block);
+ static void cf_client_surface_release(CFAllocatorRef allocator, const void *client_surface);
+ 
++/* Highball: cross-process swapchains (Wine bug 60263). A window whose root belongs to another
++ * process (a CEF GPU process presenting into the browser process's window: Steam, Rockstar,
++ * Ubisoft Connect) has no Cocoa view of ours to draw into. Its client surface renders into a
++ * CAContext-backed layer that the root's owner hosts, see
++ * macdrv_client_surface_acquire_metal_swapchain(). D3DMetal/DXMT are none the wiser: the
++ * surface's view is handed out as client_cocoa_view, doubles as the "metal view" handle, and the
++ * layer behind it is the offscreen swapchain's. Surfaces are keyed by that view, not by HWND: the
++ * same HWND is asked for a swapchain several times (CEF recreates it on every resize). */
++static pthread_mutex_t remote_layer_mutex = PTHREAD_MUTEX_INITIALIZER;
++static CFMutableDictionaryRef remote_layer_surfaces;   /* view -> client_surface D3DMetal/DXMT still uses */
++
++/* One retired surface held per child HWND. CAContextSwapChain's dealloc un-hosts the layer, and
++ * a client that resizes by destroying its swapchain and creating a new one would have nothing
++ * hosted between the two; so a released surface is held until the child's next release, which
++ * follows its successor's creation (the owner retires the old layer when the new one is hosted).
++ * A destroyed child never releases again, so a release whose child is gone is not held, and
++ * every release sweeps out dead slots. */
++static CFMutableDictionaryRef pending_by_child;        /* child HWND -> retired client_surface */
++
++static struct client_surface *remote_layer_surface_for_view(macdrv_view view)
++{
++    struct client_surface *client = NULL;
++
++    if (!view) return NULL;
++    pthread_mutex_lock(&remote_layer_mutex);
++    if (remote_layer_surfaces)
++        client = (struct client_surface *)CFDictionaryGetValue(remote_layer_surfaces, view);
++    pthread_mutex_unlock(&remote_layer_mutex);
++    return client;
++}
++
++static BOOL remote_layer_surface_add(struct macdrv_client_surface *surface)
++{
++    BOOL ret;
++
++    pthread_mutex_lock(&remote_layer_mutex);
++    if (!remote_layer_surfaces)
++        remote_layer_surfaces = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
++    if ((ret = remote_layer_surfaces && surface->cocoa_view))
++        CFDictionarySetValue(remote_layer_surfaces, surface->cocoa_view, &surface->client);
++    pthread_mutex_unlock(&remote_layer_mutex);
++    return ret;
++}
++
++/* The surface behind a view, removed from the table; NULL when the view is not one of ours. */
++static struct client_surface *remote_layer_surface_take(macdrv_view view)
++{
++    struct client_surface *client = NULL;
++
++    if (!view) return NULL;
++    pthread_mutex_lock(&remote_layer_mutex);
++    if (remote_layer_surfaces &&
++        (client = (struct client_surface *)CFDictionaryGetValue(remote_layer_surfaces, view)))
++        CFDictionaryRemoveValue(remote_layer_surfaces, view);
++    pthread_mutex_unlock(&remote_layer_mutex);
++    return client;
++}
++
++/* Remove every held surface whose child window no longer exists, for release outside the lock.
++ * Called with remote_layer_mutex held; at most max per call, the rest on the next release. */
++static CFIndex collect_dead_pending(struct client_surface **out, CFIndex max)
++{
++    CFIndex count, i, n = 0;
++    const void **keys, **vals;
++
++    if (!pending_by_child || !(count = CFDictionaryGetCount(pending_by_child))) return 0;
++    keys = calloc(count, sizeof(*keys));
++    vals = calloc(count, sizeof(*vals));
++    if (!keys || !vals) { free(keys); free(vals); return 0; }
++    CFDictionaryGetKeysAndValues(pending_by_child, keys, vals);
++    for (i = 0; i < count && n < max; i++)
++    {
++        if (NtUserIsWindow((HWND)keys[i])) continue;
++        out[n++] = (struct client_surface *)vals[i];
++        CFDictionaryRemoveValue(pending_by_child, keys[i]);
++    }
++    free(keys);
++    free(vals);
++    return n;
++}
++
++/* Retire the surface behind a view D3DMetal/DXMT is finished with; TRUE if the view was one of
++ * ours, so the caller falls through to the ordinary metal view release when it was not. */
++static BOOL release_remote_layer_view(macdrv_view view)
++{
++    struct client_surface *client, *drain = NULL;
++    struct client_surface *dead[16];
++    CFIndex ndead, i;
++    HWND owner;
++
++    if (!(client = remote_layer_surface_take(view))) return FALSE;
++
++    owner = client->hwnd;
++    pthread_mutex_lock(&remote_layer_mutex);
++    if (!pending_by_child)
++        pending_by_child = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
++    if (!pending_by_child || !owner || !NtUserIsWindow(owner))
++    {
++        /* no table, or the child is already gone and no successor will ever come: release now */
++        drain = client;
++    }
++    else
++    {
++        drain = (struct client_surface *)CFDictionaryGetValue(pending_by_child, owner);
++        CFDictionarySetValue(pending_by_child, owner, client);
++    }
++    ndead = collect_dead_pending(dead, ARRAY_SIZE(dead));
++    pthread_mutex_unlock(&remote_layer_mutex);
++
++    TRACE("view %p child %p: %s, draining %p and %ld dead-child slot(s)\n", view, owner,
++          drain == client ? "child gone, released now" : "held", drain, (long)ndead);
++    if (drain) client_surface_release(drain);
++    for (i = 0; i < ndead; i++) client_surface_release(dead[i]);
++    return TRUE;
++}
++
+ static void my_macdrv_init_display_devices(BOOL p1)
+ {
+     TRACE("macdrv_init_display_devices %d - no-op\n", p1);
+@@ -102,6 +220,7 @@ static struct d3dmetal_macdrv_win_data *my_get_win_data(HWND hwnd)
+     struct macdrv_win_data *data;
+     struct d3dmetal_macdrv_win_data *d3dm_data;
+     struct macdrv_client_surface *client_surface;
++    BOOL remote;
+     TRACE("get_win_data %p\n", hwnd);
+ 
+     /* Creating a client surface on each call to get_win_data() means it's no longer idempotent,
+@@ -111,9 +230,14 @@ static struct d3dmetal_macdrv_win_data *my_get_win_data(HWND hwnd)
+      */
+     client_surface = macdrv_client_surface_create(hwnd);
+ 
++    /* Highball: a window whose root another process owns gets a remote layer instead of a view
++     * in a window of ours; the layer is created once the renderer hands over its Metal device,
++     * in my_macdrv_view_create_metal_view(). */
++    remote = macdrv_window_has_foreign_root(hwnd, NULL);
++
+     /* get_win_data() needs to happen after client_surface creation to avoid deadlocks */
+     data = get_win_data(hwnd);
+-    if (!data)
++    if (!data && !remote)
+     {
+         client_surface_release((struct client_surface *)client_surface);
+         return NULL;
+@@ -121,34 +245,81 @@ static struct d3dmetal_macdrv_win_data *my_get_win_data(HWND hwnd)
+ 
+     macdrv_set_view_d3dmetal_client_surface(client_surface->cocoa_view, &client_surface->client);
+ 
+-    if (!data->d3dmetal_client_surfaces)
++    if (remote)
++    {
++        /* owned by the tables above, not by the window's data: the window may not have any */
++        if (!remote_layer_surface_add(client_surface))
++        {
++            release_win_data(data);
++            client_surface_release((struct client_surface *)client_surface);
++            return NULL;
++        }
++        TRACE("hwnd %p: root belongs to another process, surface %p view %p\n", hwnd,
++              client_surface, client_surface->cocoa_view);
++    }
++    else
+     {
+-        static const CFArrayCallBacks callbacks = { .release = cf_client_surface_release };
+-        data->d3dmetal_client_surfaces = CFArrayCreateMutable(NULL, 0, &callbacks);
++        if (!data->d3dmetal_client_surfaces)
++        {
++            static const CFArrayCallBacks callbacks = { .release = cf_client_surface_release };
++            data->d3dmetal_client_surfaces = CFArrayCreateMutable(NULL, 0, &callbacks);
++        }
++        CFArrayAppendValue(data->d3dmetal_client_surfaces, client_surface);
+     }
+-    CFArrayAppendValue(data->d3dmetal_client_surfaces, client_surface);
+ 
+     d3dm_data = calloc(1, sizeof(*d3dm_data));
+ 
+-    d3dm_data->hwnd = data->hwnd;
+-    d3dm_data->cocoa_window = data->cocoa_window;
++    d3dm_data->hwnd = hwnd;
+     /* cocoa_view is no longer present in macdrv_win_data. D3DMetal doesn't use it. */
+     d3dm_data->client_cocoa_view = client_surface->cocoa_view;
+-    d3dm_data->window_rect = data->rects.window;
+-    d3dm_data->whole_rect = data->rects.visible;
+-    d3dm_data->client_rect = data->rects.client;
+-    d3dm_data->pixel_format = data->pixel_format;
+-    /* color_key is no longer present in macdrv_win_data. Assume D3DMetal doesn't use it. */
+-    d3dm_data->drag_event = data->drag_event;
+-    d3dm_data->on_screen = data->on_screen;
+-    d3dm_data->shaped = data->shaped;
+-    d3dm_data->layered = data->layered;
+-    d3dm_data->ulw_layered = data->ulw_layered;
+-    d3dm_data->per_pixel_alpha = data->per_pixel_alpha;
+-    d3dm_data->minimized = data->minimized;
+-    /* swap_interval is no longer present in macdrv_win_data. Assume D3DMetal doesn't use it. */
+-    /* surface/unminimized_surface are no longer present in macdrv_win_data. Assume D3DMetal doesn't use it. */
+-    d3dm_data->padding[0] = data;
++    if (data)
++    {
++        d3dm_data->cocoa_window = data->cocoa_window;
++        d3dm_data->window_rect = data->rects.window;
++        d3dm_data->whole_rect = data->rects.visible;
++        d3dm_data->client_rect = data->rects.client;
++        d3dm_data->pixel_format = data->pixel_format;
++        /* color_key is no longer present in macdrv_win_data. Assume D3DMetal doesn't use it. */
++        d3dm_data->drag_event = data->drag_event;
++        d3dm_data->on_screen = data->on_screen;
++        d3dm_data->shaped = data->shaped;
++        d3dm_data->layered = data->layered;
++        d3dm_data->ulw_layered = data->ulw_layered;
++        d3dm_data->per_pixel_alpha = data->per_pixel_alpha;
++        d3dm_data->minimized = data->minimized;
++        /* swap_interval is no longer present in macdrv_win_data. Assume D3DMetal doesn't use it. */
++        /* surface/unminimized_surface are no longer present in macdrv_win_data. Assume D3DMetal doesn't use it. */
++    }
++    else
++    {
++        /* Highball: a window this process never positioned, owned by another process. The rects
++         * are the ones the driver would have recorded, relative to the parent's client area. */
++        HWND parent = NtUserGetAncestor(hwnd, GA_PARENT);
++        UINT dpi = NtUserGetWinMonitorDpi(hwnd, MDT_RAW_DPI);
++        RECT window_rect, client_rect;
++
++        if (NtUserGetWindowRect(hwnd, &window_rect, dpi))
++        {
++            if (parent) NtUserMapWindowPoints(0, parent, (POINT *)&window_rect, 2, dpi);
++            d3dm_data->window_rect = d3dm_data->whole_rect = window_rect;
++        }
++        if (NtUserGetClientRect(hwnd, &client_rect, dpi))
++        {
++            NtUserMapWindowPoints(hwnd, parent, (POINT *)&client_rect, 2, dpi);
++            d3dm_data->client_rect = client_rect;
++        }
++        d3dm_data->on_screen = !!(NtUserGetWindowLongW(hwnd, GWL_STYLE) & WS_VISIBLE);
++    }
++
++    if (remote)
++    {
++        /* Highball: nothing here needs the window's data locked while the renderer sets up, and
++         * the swapchain creation below waits on the main thread. */
++        release_win_data(data);
++        d3dm_data->padding[0] = NULL;
++    }
++    else
++        d3dm_data->padding[0] = data;
+ 
+     return d3dm_data;
+ }
+@@ -160,7 +331,7 @@ static void my_release_win_data(struct d3dmetal_macdrv_win_data *data)
+     if (!data)
+         return;
+ 
+-    release_win_data(data->padding[0]);
++    if (data->padding[0]) release_win_data(data->padding[0]);
+     free(data);
+ }
+ 
+@@ -184,19 +355,47 @@ static void my_macdrv_release_metal_device(macdrv_metal_device d)
+ 
+ static macdrv_metal_view my_macdrv_view_create_metal_view(macdrv_view v, macdrv_metal_device d)
+ {
++    struct client_surface *client;
++
+     TRACE("macdrv_view_create_metal_view %p %p\n", v, d);
++
++    /* Highball: a remote surface's view is a placeholder. The layer it hands out is the offscreen
++     * swapchain's, created here with the renderer's device, and the view itself is the handle
++     * the renderer gets back, so that get_metal_layer() and release_metal_view() find it. */
++    if ((client = remote_layer_surface_for_view(v)))
++    {
++        struct macdrv_client_surface *surface = impl_from_client_surface(client);
++
++        if (!macdrv_client_surface_acquire_metal_swapchain(surface, d))
++        {
++            ERR("no remote swapchain for %s\n", debugstr_client_surface(client));
++            if (remote_layer_surface_take(v)) client_surface_release(client);
++            return NULL;
++        }
++        return (macdrv_metal_view)v;
++    }
++
+     return macdrv_view_create_metal_view(v, d);
+ }
+ 
+ static macdrv_metal_layer my_macdrv_view_get_metal_layer(macdrv_metal_view v)
+ {
++    struct client_surface *client;
++
+     TRACE("macdrv_view_get_metal_layer %p\n", v);
++
++    if ((client = remote_layer_surface_for_view((macdrv_view)v)))
++        return macdrv_swapchain_get_layer(impl_from_client_surface(client)->metal_swapchain);
++
+     return macdrv_view_get_metal_layer(v);
+ }
+ 
+ static void my_macdrv_view_release_metal_view(macdrv_metal_view v)
+ {
+     TRACE("macdrv_view_release_metal_view %p\n", v);
++
++    if (release_remote_layer_view((macdrv_view)v)) return;
++
+     return macdrv_view_release_metal_view(v);
+ }
+ 
+diff --git a/dlls/winemac.drv/gdi.c b/dlls/winemac.drv/gdi.c
+index 7342494..bd6ab44 100644
+--- a/dlls/winemac.drv/gdi.c
++++ b/dlls/winemac.drv/gdi.c
+@@ -213,15 +213,10 @@ static INT macdrv_GetDeviceCaps(PHYSDEV dev, INT cap)
+     case VERTSIZE:
+         ret = vert_size;
+         break;
+-    case HORZRES:
+-    case VERTRES:
+     default:
+         pthread_mutex_unlock(&device_data_mutex);
+         dev = GET_NEXT_PHYSDEV( dev, pGetDeviceCaps );
+-        ret = dev->funcs->pGetDeviceCaps( dev, cap );
+-        if ((cap == HORZRES || cap == VERTRES) && retina_on)
+-            ret *= 2;
+-        return ret;
++        return dev->funcs->pGetDeviceCaps( dev, cap );
+     }
+ 
+     TRACE("cap %d -> %d\n", cap, ret);
+diff --git a/dlls/winemac.drv/macdrv.h b/dlls/winemac.drv/macdrv.h
+index 5735ff7..1a22e60 100644
+--- a/dlls/winemac.drv/macdrv.h
++++ b/dlls/winemac.drv/macdrv.h
+@@ -100,6 +100,12 @@ static inline RECT rect_from_cgrect(CGRect cgrect)
+ {
+     WM_MACDRV_SET_WIN_REGION = WM_WINE_FIRST_DRIVER_MSG,
+     WM_MACDRV_ACTIVATE_ON_FOLLOWING_FOCUS,
++    /* Highball: cross-process Metal swapchains (Wine bug 60263). Posted to the window that owns
++     * the NSWindow; wParam is the child hwnd the layer belongs to (0 for the window itself),
++     * lParam the CAContext id. */
++    WM_MACDRV_CREATE_REMOTE_LAYER,
++    WM_MACDRV_RELEASE_REMOTE_LAYER,
++    WM_MACDRV_UPDATE_REMOTE_LAYER,
+ };
+ 
+ struct macdrv_thread_data
+@@ -194,17 +200,21 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+     unsigned int        per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
+     unsigned int        minimized : 1;          /* is window minimized? */
+     unsigned int        fullscreen : 1;         /* is the window visible rect fullscreen? (unrelated to native AppKit/Cocoa fullscreen) */
++    unsigned int        remote_swapchain : 1;   /* Highball: renders into a layer hosted by the root's owner (another process) */
+ 
+     /* CW HACK 22435 */
+     CFMutableArrayRef   d3dmetal_client_surfaces;
++
++    /* Highball: CAContextID -> child HWND for the cross-process layers hosted on this window,
++     * so they can be repositioned and restacked as the children move (Wine bug 60263). */
++    CFMutableDictionaryRef remote_layer_children;
+ };
+ 
+ struct macdrv_client_surface
+ {
+     struct client_surface client;
+     macdrv_view           cocoa_view;
+-    macdrv_metal_device   metal_device;
+-    macdrv_metal_view     metal_view;
++    macdrv_metal_swapchain metal_swapchain;
+ };
+ 
+ static inline struct macdrv_client_surface *impl_from_client_surface(struct client_surface *client)
+@@ -213,6 +223,9 @@ extern BOOL macdrv_SystemParametersInfo(UINT action, UINT int_param, void *ptr_p
+ }
+ 
+ extern struct macdrv_client_surface *macdrv_client_surface_create(HWND hwnd);
++extern BOOL macdrv_client_surface_acquire_metal_swapchain(struct macdrv_client_surface *surface,
++                                                          macdrv_metal_device device);
++extern BOOL macdrv_window_has_foreign_root(HWND hwnd, HWND *root);
+ 
+ extern struct macdrv_win_data *get_win_data(HWND hwnd);
+ extern void release_win_data(struct macdrv_win_data *data);
+diff --git a/dlls/winemac.drv/macdrv_cocoa.h b/dlls/winemac.drv/macdrv_cocoa.h
+index 477efe9..b9cc6b6 100644
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -122,6 +122,7 @@
+ typedef struct macdrv_opaque_metal_device* macdrv_metal_device;
+ typedef struct macdrv_opaque_metal_view* macdrv_metal_view;
+ typedef struct macdrv_opaque_metal_layer* macdrv_metal_layer;
++typedef struct macdrv_opaque_metal_swapchain* macdrv_metal_swapchain;
+ typedef struct macdrv_opaque_status_item* macdrv_status_item;
+ struct macdrv_event;
+ struct macdrv_query;
+@@ -559,6 +560,19 @@ extern void macdrv_order_cocoa_window(macdrv_window w, macdrv_window prev,
+ extern macdrv_metal_view macdrv_view_create_metal_view(macdrv_view v, macdrv_metal_device d);
+ extern macdrv_metal_layer macdrv_view_get_metal_layer(macdrv_metal_view v);
+ extern void macdrv_view_release_metal_view(macdrv_metal_view v);
++/* Highball: Metal swapchains that can live in a window another process owns (Wine bug 60263) */
++extern macdrv_metal_swapchain macdrv_create_view_swapchain(macdrv_view v, macdrv_metal_device device);
++extern macdrv_metal_swapchain macdrv_create_offscreen_swapchain(void* hwnd, void* child, CGRect bounds,
++                                                                 macdrv_metal_device device);
++extern macdrv_metal_layer macdrv_swapchain_get_layer(macdrv_metal_swapchain swapchain);
++extern void macdrv_destroy_swapchain(macdrv_metal_swapchain swapchain);
++extern void macdrv_window_create_ca_layer_host_view(macdrv_window w, unsigned int context_id,
++                                                    CGRect frame, double zpos, int zpos_valid);
++extern void macdrv_window_update_ca_layer_host_frame(macdrv_window w, unsigned int context_id,
++                                                     CGRect frame, double zpos, int zpos_valid);
++extern void macdrv_window_release_ca_layer_host_view(macdrv_window w, unsigned int context_id);
++extern void macdrv_create_remote_layer(void* hwnd, void* child, unsigned int context_id);
++extern void macdrv_release_remote_layer(void* hwnd, unsigned int context_id);
+ extern bool macdrv_get_view_backing_size(macdrv_view v, int backing_size[2]);
+ extern void macdrv_set_view_backing_size(macdrv_view v, const int backing_size[2]);
+ extern uint32_t macdrv_window_background_color(void);
+diff --git a/dlls/winemac.drv/vulkan.c b/dlls/winemac.drv/vulkan.c
+index d146a45..bfa656e 100644
+--- a/dlls/winemac.drv/vulkan.c
++++ b/dlls/winemac.drv/vulkan.c
+@@ -52,8 +52,9 @@ static VkResult macdrv_vulkan_surface_create(HWND hwnd, const struct vulkan_inst
+     TRACE("%p %p %p %p\n", hwnd, instance, handle, client);
+ 
+     if (!(surface = macdrv_client_surface_create(hwnd))) return VK_ERROR_OUT_OF_HOST_MEMORY;
+-    if (!(surface->metal_device = macdrv_create_metal_device())) goto err;
+-    if (!(surface->metal_view = macdrv_view_create_metal_view(surface->cocoa_view, surface->metal_device))) goto err;
++    /* Highball: a swapchain in our own window, or a layer hosted by the window's owning process
++     * when that is another process (Wine bug 60263) */
++    if (!macdrv_client_surface_acquire_metal_swapchain(surface, NULL)) goto err;
+ 
+     if (instance->p_vkCreateMetalSurfaceEXT)
+     {
+@@ -61,7 +62,7 @@ static VkResult macdrv_vulkan_surface_create(HWND hwnd, const struct vulkan_inst
+         create_info_host.sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
+         create_info_host.pNext = NULL;
+         create_info_host.flags = 0; /* reserved */
+-        create_info_host.pLayer = macdrv_view_get_metal_layer(surface->metal_view);
++        create_info_host.pLayer = macdrv_swapchain_get_layer(surface->metal_swapchain);
+ 
+         res = instance->p_vkCreateMetalSurfaceEXT(instance->host.instance, &create_info_host, NULL /* allocator */, handle);
+     }
+@@ -71,7 +72,7 @@ static VkResult macdrv_vulkan_surface_create(HWND hwnd, const struct vulkan_inst
+         create_info_host.sType = VK_STRUCTURE_TYPE_MACOS_SURFACE_CREATE_INFO_MVK;
+         create_info_host.pNext = NULL;
+         create_info_host.flags = 0; /* reserved */
+-        create_info_host.pView = macdrv_view_get_metal_layer(surface->metal_view);
++        create_info_host.pView = macdrv_swapchain_get_layer(surface->metal_swapchain);
+ 
+         res = instance->p_vkCreateMacOSSurfaceMVK(instance->host.instance, &create_info_host, NULL /* allocator */, handle);
+     }
+diff --git a/dlls/winemac.drv/window.c b/dlls/winemac.drv/window.c
+index 741f7fd..b8619f5 100644
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -247,6 +247,31 @@ void release_win_data(struct macdrv_win_data *data)
+ }
+ 
+ 
++/***********************************************************************
++ *              macdrv_window_has_foreign_root
++ *
++ * Highball: TRUE when the root window of hwnd has no win data in this
++ * process, which is when another process created it: win_datas is per
++ * process, so get_win_data() cannot see a foreign window by construction.
++ * That is how a CEF GPU process (Steam, Rockstar, Ubisoft Connect) asks for
++ * a swapchain on a child of the browser process's window (Wine bug 60263).
++ */
++BOOL macdrv_window_has_foreign_root(HWND hwnd, HWND *root_ret)
++{
++    HWND root = NtUserGetAncestor(hwnd, GA_ROOT);
++    struct macdrv_win_data *data;
++
++    if (root_ret) *root_ret = root;
++    if (!root || root == NtUserGetDesktopWindow()) return FALSE;
++    if ((data = get_win_data(root)))
++    {
++        release_win_data(data);
++        return FALSE;
++    }
++    return TRUE;
++}
++
++
+ /***********************************************************************
+  *              macdrv_get_cocoa_window
+  *
+@@ -1146,8 +1171,7 @@ static void macdrv_client_surface_destroy(struct client_surface *client)
+ 
+     TRACE("%s\n", debugstr_client_surface(client));
+ 
+-    if (surface->metal_view) macdrv_view_release_metal_view(surface->metal_view);
+-    if (surface->metal_device) macdrv_release_metal_device(surface->metal_device);
++    if (surface->metal_swapchain) macdrv_destroy_swapchain(surface->metal_swapchain);
+ }
+ 
+ static void macdrv_client_surface_detach(struct client_surface *client)
+@@ -1237,6 +1261,52 @@ struct macdrv_client_surface *macdrv_client_surface_create(HWND hwnd)
+     return surface;
+ }
+ 
++/***********************************************************************
++ *              macdrv_client_surface_acquire_metal_swapchain
++ *
++ * Highball: the Metal layer a client surface renders into. In our own
++ * windows that is a WineMetalView in the surface's view. When the root
++ * window belongs to another process (Wine bug 60263) there is no window of
++ * ours to put a view in, so the layer is exported through a CAContext and
++ * the root's owner hosts it in its content view (WM_MACDRV_CREATE_REMOTE_LAYER).
++ * device may be NULL, in which case the swapchain creates its own.
++ */
++BOOL macdrv_client_surface_acquire_metal_swapchain(struct macdrv_client_surface *surface,
++                                                   macdrv_metal_device device)
++{
++    HWND hwnd = surface->client.hwnd, root;
++    struct macdrv_win_data *data;
++    RECT rect;
++
++    if (surface->metal_swapchain) return TRUE;
++
++    if (!macdrv_window_has_foreign_root(hwnd, &root))
++    {
++        surface->metal_swapchain = macdrv_create_view_swapchain(surface->cocoa_view, device);
++        return surface->metal_swapchain != NULL;
++    }
++
++    /* The layer's bounds only need the child's size; the root's owner positions the hosted
++     * layer from the child's window rect (see WM_MACDRV_CREATE_REMOTE_LAYER). */
++    if (!NtUserGetClientRect(hwnd, &rect, NtUserGetWinMonitorDpi(hwnd, MDT_RAW_DPI))) return FALSE;
++    OffsetRect(&rect, -rect.left, -rect.top);
++
++    TRACE("%s: root %p belongs to another process, hosting a remote layer there, bounds %s\n",
++          debugstr_client_surface(&surface->client), root, wine_dbgstr_rect(&rect));
++    surface->metal_swapchain = macdrv_create_offscreen_swapchain(root, root == hwnd ? NULL : hwnd,
++                                                                 cgrect_from_rect(rect), device);
++    if (!surface->metal_swapchain) return FALSE;
++
++    /* A child this process created has win data; its moves are relayed to the root's owner from
++     * WindowPosChanged so the hosted layer follows. */
++    if ((data = get_win_data(hwnd)))
++    {
++        data->remote_swapchain = 1;
++        release_win_data(data);
++    }
++    return TRUE;
++}
++
+ /**********************************************************************
+  *              SetDesktopWindow   (MACDRV.@)
+  */
+@@ -1336,6 +1406,8 @@ void macdrv_DestroyWindow(HWND hwnd)
+     /* CW HACK 22435 */
+     if (data->d3dmetal_client_surfaces) CFRelease(data->d3dmetal_client_surfaces);
+ 
++    if (data->remote_layer_children) CFRelease(data->remote_layer_children);
++
+     CFDictionaryRemoveValue(win_datas, hwnd);
+     release_win_data(data);
+     free(data);
+@@ -1595,6 +1667,310 @@ void macdrv_UpdateLayeredWindow(HWND hwnd, BYTE alpha, UINT flags)
+ }
+ 
+ 
++/* Highball: hosting of layers rendered by another process (Wine bug 60263). The rendering
++ * process exports a CAContext and posts WM_MACDRV_CREATE_REMOTE_LAYER to the window that owns
++ * the NSWindow; this side hosts it, places it on the child's rect, stacks it in Win32 paint
++ * order and keeps it there as the child moves. */
++
++/* Win32 paint order for the hosted children of one root; higher index = nearer the viewer.
++ * Siblings are walked bottom to top (GW_HWNDNEXT runs top to bottom) and a window is recorded
++ * before its own children, so a child sits above its parent and an upper sibling above the whole
++ * subtree of a lower one. Built once per update, not once per layer: this runs during a drag. */
++#define PAINT_ORDER_DEPTH 32
++
++struct paint_order
++{
++    HWND *hwnds;                   /* index 0 = furthest back; grown by doubling */
++    int   count, capacity;
++    BOOL  truncated;               /* a bound was hit; z-order below is incomplete */
++};
++
++static void paint_order_truncated(struct paint_order *po, const char *why, HWND at)
++{
++    static BOOL warned;
++
++    if (!warned)
++    {
++        FIXME("%s below %p, paint order incomplete, hosted layers past the cap keep their z\n",
++              why, at);
++        warned = TRUE;
++    }
++    po->truncated = TRUE;
++}
++
++static BOOL paint_order_add(struct paint_order *po, HWND hwnd)
++{
++    if (po->count == po->capacity)
++    {
++        int capacity = po->capacity ? po->capacity * 2 : 32;
++        HWND *hwnds = realloc(po->hwnds, capacity * sizeof(*hwnds));
++
++        if (!hwnds)
++        {
++            paint_order_truncated(po, "out of memory", hwnd);
++            return FALSE;
++        }
++        po->hwnds = hwnds;
++        po->capacity = capacity;
++    }
++    po->hwnds[po->count++] = hwnd;
++    return TRUE;
++}
++
++/* GW_CHILD gives the topmost child and GW_HWNDLAST the bottommost sibling, so GW_HWNDPREV from
++ * there walks bottom to top. */
++static void paint_order_walk(HWND parent, struct paint_order *po, int depth)
++{
++    HWND k;
++
++    if (depth >= PAINT_ORDER_DEPTH)
++    {
++        paint_order_truncated(po, "window tree too deep", parent);
++        return;
++    }
++
++    if (!(k = NtUserGetWindowRelative(parent, GW_CHILD))) return;
++
++    for (k = NtUserGetWindowRelative(k, GW_HWNDLAST); k;
++         k = NtUserGetWindowRelative(k, GW_HWNDPREV))
++    {
++        if (!paint_order_add(po, k)) return;
++        paint_order_walk(k, po, depth + 1);
++    }
++}
++
++static void build_paint_order(HWND root, struct paint_order *po)
++{
++    po->hwnds = NULL;
++    po->count = po->capacity = 0;
++    po->truncated = FALSE;
++    if (root) paint_order_walk(root, po, 0);
++}
++
++static void paint_order_free(struct paint_order *po)
++{
++    free(po->hwnds);
++    po->hwnds = NULL;
++    po->count = po->capacity = 0;
++}
++
++/* TRUE + *zpos on success; on failure the caller must leave zPosition alone. Returning 0.0 for
++ * "not found" would be indistinguishable from a legitimate bottom-most position. */
++static BOOL paint_order_zpos(const struct paint_order *po, HWND child, double *zpos)
++{
++    int i;
++
++    for (i = 0; i < po->count; i++)
++        if (po->hwnds[i] == child) { *zpos = (double)(i + 1); return TRUE; }
++    return FALSE;
++}
++
++/* The child's window rect in the root's content view space, in Win32 pixels: the child's rect
++ * in the root's client coordinates, offset the way macdrv_client_surface_update() places a
++ * same-process child's view. FALSE when the child is gone. A hidden child gets an empty rect,
++ * which hides its layer. */
++static BOOL get_remote_layer_frame(struct macdrv_win_data *data, HWND child, RECT *frame)
++{
++    UINT dpi = NtUserGetWinMonitorDpi(data->hwnd, MDT_RAW_DPI);
++    RECT rect;
++
++    if (!NtUserGetWindowRect(child, &rect, dpi)) return FALSE;
++    if (!(NtUserGetWindowLongW(child, GWL_STYLE) & WS_VISIBLE))
++        SetRectEmpty(&rect);
++    else
++    {
++        NtUserMapWindowPoints(0, data->hwnd, (POINT *)&rect, 2, dpi);
++        OffsetRect(&rect, data->rects.client.left - data->rects.visible.left,
++                   data->rects.client.top - data->rects.visible.top);
++    }
++    *frame = rect;
++    return TRUE;
++}
++
++static CGRect cgrect_from_frame(const RECT *rect)
++{
++    return CGRectMake(rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top);
++}
++
++/* Retire every other hosted layer mirroring the same child, called once the replacement is in
++ * the layer tree. Retiring on the old swapchain's death instead leaves the child unhosted until
++ * the replacement's own message arrives, and the window shows straight through for that long. */
++static void retire_superseded_layers(struct macdrv_win_data *data, HWND child, unsigned int keep)
++{
++    CFIndex count, i;
++    const void **keys, **vals;
++
++    if (!data->remote_layer_children || !child) return;
++    if (!(count = CFDictionaryGetCount(data->remote_layer_children))) return;
++
++    keys = calloc(count, sizeof(*keys));
++    vals = calloc(count, sizeof(*vals));
++    if (!keys || !vals) { free(keys); free(vals); return; }
++    CFDictionaryGetKeysAndValues(data->remote_layer_children, keys, vals);
++
++    for (i = 0; i < count; i++)
++    {
++        unsigned int ctx = (unsigned int)(UINT_PTR)keys[i];
++
++        if (ctx == keep || (HWND)vals[i] != child) continue;
++        TRACE("retiring superseded layer ctx %u for child %p (replaced by %u)\n", ctx, child, keep);
++        if (data->cocoa_window) macdrv_window_release_ca_layer_host_view(data->cocoa_window, ctx);
++        CFDictionaryRemoveValue(data->remote_layer_children, (const void *)(UINT_PTR)ctx);
++    }
++    free(keys);
++    free(vals);
++}
++
++/* The context id of this root's hosted layer for this child, or 0. */
++static unsigned int remote_layer_context_for(struct macdrv_win_data *data, HWND child)
++{
++    CFIndex count, i;
++    const void **keys, **vals;
++    unsigned int context_id = 0;
++
++    if (!data->remote_layer_children || !child) return 0;
++    if (!(count = CFDictionaryGetCount(data->remote_layer_children))) return 0;
++
++    keys = calloc(count, sizeof(*keys));
++    vals = calloc(count, sizeof(*vals));
++    if (keys && vals)
++    {
++        CFDictionaryGetKeysAndValues(data->remote_layer_children, keys, vals);
++        for (i = 0; i < count && !context_id; i++)
++            if ((HWND)vals[i] == child) context_id = (unsigned int)(UINT_PTR)keys[i];
++    }
++    free(keys);
++    free(vals);
++    return context_id;
++}
++
++/* Reposition one hosted layer. A child's own move only moves that child; refreshing every layer
++ * on the root for each child costs O(n) per child during a resize. The root's own
++ * WindowPosChanged still does the full pass. */
++static void update_remote_layer_frame_for(struct macdrv_win_data *data, HWND child,
++                                          unsigned int context_id)
++{
++    struct paint_order order;
++    RECT frame;
++    double zpos = 0.0;
++    BOOL have_z;
++
++    if (!data->cocoa_window || !child || !context_id) return;
++    if (!get_remote_layer_frame(data, child, &frame)) return;
++
++    build_paint_order(data->hwnd, &order);
++    have_z = paint_order_zpos(&order, child, &zpos);
++    paint_order_free(&order);
++
++    TRACE("child %p context %u frame %s zpos %.0f%s\n", child, context_id,
++          wine_dbgstr_rect(&frame), zpos, have_z ? "" : " (not in paint order)");
++    macdrv_window_update_ca_layer_host_frame(data->cocoa_window, context_id,
++                                             cgrect_from_frame(&frame), zpos, have_z);
++}
++
++/* Re-place every cross-process layer hosted on this window: they mirror children another process
++ * owns, so no WindowPosChanged of their own arrives here. */
++static void update_remote_layer_frames(struct macdrv_win_data *data)
++{
++    CFIndex count, i;
++    const void **keys, **vals;
++    struct paint_order order;
++
++    if (!data->remote_layer_children || !data->cocoa_window) return;
++    if (!(count = CFDictionaryGetCount(data->remote_layer_children))) return;
++
++    /* one walk for all of this window's hosted layers, not one per layer */
++    build_paint_order(data->hwnd, &order);
++
++    keys = calloc(count, sizeof(*keys));
++    vals = calloc(count, sizeof(*vals));
++    if (!keys || !vals) { free(keys); free(vals); paint_order_free(&order); return; }
++    CFDictionaryGetKeysAndValues(data->remote_layer_children, keys, vals);
++
++    for (i = 0; i < count; i++)
++    {
++        HWND child = (HWND)vals[i];
++        unsigned int context_id = (unsigned int)(UINT_PTR)keys[i];
++        double zpos = 0.0;
++        BOOL have_z;
++        RECT frame;
++
++        if (!child) continue;   /* a top-level's own layer fills the content view and autoresizes */
++        if (!get_remote_layer_frame(data, child, &frame))
++        {
++            /* the child is gone; left alone its layer would stay painted at its last frame */
++            TRACE("child %p gone, releasing hosted layer %u\n", child, context_id);
++            macdrv_window_release_ca_layer_host_view(data->cocoa_window, context_id);
++            CFDictionaryRemoveValue(data->remote_layer_children, (const void *)(UINT_PTR)context_id);
++            continue;
++        }
++        have_z = paint_order_zpos(&order, child, &zpos);
++
++        TRACE("child %p context %u frame %s zpos %.0f%s\n", child, context_id,
++              wine_dbgstr_rect(&frame), zpos, have_z ? "" : " (not in paint order)");
++        macdrv_window_update_ca_layer_host_frame(data->cocoa_window, context_id,
++                                                 cgrect_from_frame(&frame), zpos, have_z);
++    }
++    free(keys);
++    free(vals);
++    paint_order_free(&order);
++}
++
++/* WM_MACDRV_CREATE_REMOTE_LAYER: host the layer another process rendered into context_id,
++ * on the rect of child (0 for the window itself). */
++static void create_remote_layer(struct macdrv_win_data *data, HWND child, unsigned int context_id)
++{
++    struct paint_order order;
++    CGRect frame = CGRectNull;
++    double zpos = 0.0;
++    BOOL have_z;
++    RECT rect;
++
++    if (!data->cocoa_window) return;
++    if (child)
++    {
++        if (!get_remote_layer_frame(data, child, &rect))
++        {
++            /* the child went away between the post and this handler; with no rect the layer
++             * would cover the whole content view with nothing ever drawn into it */
++            TRACE("child %p gone before context %u could be hosted, not hosting\n", child, context_id);
++            return;
++        }
++        frame = cgrect_from_frame(&rect);
++        TRACE("child %p layer frame in root %p = %s\n", child, data->hwnd, wine_dbgstr_rect(&rect));
++    }
++
++    build_paint_order(data->hwnd, &order);
++    have_z = child && paint_order_zpos(&order, child, &zpos);
++    paint_order_free(&order);
++    macdrv_window_create_ca_layer_host_view(data->cocoa_window, context_id, frame, zpos, have_z);
++
++    /* Track every hosted layer: a child's so it can be repositioned, and a top-level's own
++     * (child NULL) so the release handler can tell "never tracked" from "already retired". */
++    if (!data->remote_layer_children)
++        data->remote_layer_children = CFDictionaryCreateMutable(NULL, 0, NULL, NULL);
++    if (data->remote_layer_children)
++    {
++        CFDictionarySetValue(data->remote_layer_children, (const void *)(UINT_PTR)context_id, child);
++        /* the replacement is hosted now, only now do its predecessors go */
++        if (child) retire_superseded_layers(data, child, context_id);
++    }
++}
++
++/* WM_MACDRV_RELEASE_REMOTE_LAYER: every hosted layer is tracked, so an untracked id is one
++ * retire_superseded_layers() already took, and skipping it keeps the two paths from racing
++ * over a reused id. */
++static void release_remote_layer(struct macdrv_win_data *data, unsigned int context_id)
++{
++    if (data->remote_layer_children &&
++        !CFDictionaryContainsKey(data->remote_layer_children, (const void *)(UINT_PTR)context_id))
++        return;
++    if (data->cocoa_window) macdrv_window_release_ca_layer_host_view(data->cocoa_window, context_id);
++    if (data->remote_layer_children)
++        CFDictionaryRemoveValue(data->remote_layer_children, (const void *)(UINT_PTR)context_id);
++}
++
++
+ /**********************************************************************
+  *              WindowMessage   (MACDRV.@)
+  */
+@@ -1617,6 +1993,30 @@ LRESULT macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+         activate_on_following_focus();
+         TRACE("WM_MACDRV_ACTIVATE_ON_FOLLOWING_FOCUS time %u\n", activate_on_focus_time);
+         return 0;
++    case WM_MACDRV_CREATE_REMOTE_LAYER:
++        if ((data = get_win_data(hwnd)))
++        {
++            TRACE("WM_MACDRV_CREATE_REMOTE_LAYER child %p context_id %u\n", (HWND)wp, (unsigned int)lp);
++            create_remote_layer(data, (HWND)wp, (unsigned int)lp);
++            release_win_data(data);
++        }
++        return 0;
++    case WM_MACDRV_RELEASE_REMOTE_LAYER:
++        if ((data = get_win_data(hwnd)))
++        {
++            TRACE("WM_MACDRV_RELEASE_REMOTE_LAYER context_id %u\n", (unsigned int)lp);
++            release_remote_layer(data, (unsigned int)lp);
++            release_win_data(data);
++        }
++        return 0;
++    case WM_MACDRV_UPDATE_REMOTE_LAYER:
++        if ((data = get_win_data(hwnd)))
++        {
++            TRACE("WM_MACDRV_UPDATE_REMOTE_LAYER child %p\n", (HWND)wp);
++            update_remote_layer_frame_for(data, (HWND)wp, remote_layer_context_for(data, (HWND)wp));
++            release_win_data(data);
++        }
++        return 0;
+     }
+ 
+     FIXME("unrecognized window msg %x hwnd %p wp %lx lp %lx\n", msg, hwnd, (unsigned long)wp, lp);
+@@ -1624,6 +2024,20 @@ LRESULT macdrv_WindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+ }
+ 
+ 
++/* Called from the rendering process. hwnd is the window whose owner hosts the layer, child the
++ * cross-process child it belongs to (NULL for the window itself). */
++void macdrv_create_remote_layer(void* hwnd_ptr, void* child_ptr, unsigned int context_id)
++{
++    NtUserPostMessage((HWND)hwnd_ptr, WM_MACDRV_CREATE_REMOTE_LAYER, (WPARAM)child_ptr, context_id);
++}
++
++
++void macdrv_release_remote_layer(void* hwnd_ptr, unsigned int context_id)
++{
++    NtUserPostMessage((HWND)hwnd_ptr, WM_MACDRV_RELEASE_REMOTE_LAYER, 0, context_id);
++}
++
++
+ /***********************************************************************
+  *              WindowPosChanging   (MACDRV.@)
+  */
+@@ -1692,7 +2106,30 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
+     TRACE("win %p/%p new_rects %s style %08x flags %08x surface %p\n", hwnd, data->cocoa_window,
+           debugstr_window_rects(new_rects), new_style, swp_flags, surface);
+ 
+-    if (!data->cocoa_window) goto done;
++    if (!data->cocoa_window)
++    {
++        /* Highball: a child with a layer hosted on its root's window (Wine bug 60263) has win
++         * data but no Cocoa window, and its moves are only seen here, in its own thread. Either
++         * the root is ours (a foreign process's child re-parented into our window, or a child of
++         * another thread of ours) and the hosted layer is moved directly, or the root belongs to
++         * another process and that process is told. swp_flags are the effective flags, so a
++         * no-op call carries NOMOVE|NOSIZE|NOZORDER and costs nothing. */
++        HWND root = NtUserGetAncestor(hwnd, GA_ROOT);
++        BOOL moved = (~swp_flags & (SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER)) ||
++                     (swp_flags & (SWP_SHOWWINDOW | SWP_HIDEWINDOW));
++        BOOL remote = data->remote_swapchain;
++
++        release_win_data(data);
++        if (!moved || !root || root == hwnd) return;
++        if ((data = get_win_data(root)))
++        {
++            update_remote_layer_frame_for(data, hwnd, remote_layer_context_for(data, hwnd));
++            release_win_data(data);
++        }
++        else if (remote)
++            NtUserPostMessage(root, WM_MACDRV_UPDATE_REMOTE_LAYER, (WPARAM)hwnd, 0);
++        return;
++    }
+ 
+     if (data->on_screen)
+     {
+@@ -1725,6 +2162,10 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
+         }
+     }
+ 
++    /* after the Cocoa frame is current, so hosted cross-process layers are placed against the
++     * content view's new bounds rather than the ones it is about to leave */
++    update_remote_layer_frames(data);
++
+     if (fullscreen || fullscreen != data->fullscreen)
+     {
+         CGRect rect = (fullscreen && !EqualRect(&data->rects.window, &data->rects.visible)) ? cgrect_from_rect(data->rects.window) : CGRectZero;
+@@ -1732,7 +2173,6 @@ void macdrv_WindowPosChanged(HWND hwnd, HWND insert_after, HWND owner_hint, UINT
+         data->fullscreen = fullscreen;
+     }
+ 
+-done:
+     release_win_data(data);
+ }
+ 
+diff --git a/include/winbase.h b/include/winbase.h
+index 0213b40..5e18722 100644
+--- a/include/winbase.h
++++ b/include/winbase.h
+@@ -2690,7 +2690,16 @@ static FORCEINLINE DWORD WINAPI GetCurrentThreadId(void)
+ 
+ static FORCEINLINE DWORD WINAPI GetLastError(void)
+ {
++#if defined(__x86_64__) && defined(__GNUC__) && !defined(__arm64ec__) && !defined(WINE_UNIX_LIB)
++    /* Read the value where MSVC-built code reads it (%gs:0x68). On Linux that is the TEB field
++     * itself; on macOS the unix side hands PE code that slot as LastErrorValue and keeps it in
++     * step with the TEB at every crossing (ntdll/unix/signal_x86_64.c). */
++    DWORD err;
++    __asm__ volatile( "movl %%gs:0x68,%0" : "=r" (err) );
++    return err;
++#else
+     return *(DWORD *)((void **)NtCurrentTeb() + 13);
++#endif
+ }
+ 
+ static FORCEINLINE HANDLE WINAPI GetProcessHeap(void)
+@@ -2701,6 +2710,9 @@ static FORCEINLINE HANDLE WINAPI GetProcessHeap(void)
+ static FORCEINLINE void WINAPI SetLastError( DWORD err )
+ {
+     *(DWORD *)((void **)NtCurrentTeb() + 13) = err;
++#if defined(__x86_64__) && defined(__GNUC__) && !defined(__arm64ec__) && !defined(WINE_UNIX_LIB)
++    __asm__ volatile( "movl %0,%%gs:0x68" :: "r" (err) );   /* see GetLastError() above */
++#endif
+ }
+ 
+ #else  /* __WINESRC__ */
+diff --git a/loader/wine.inf.in b/loader/wine.inf.in
+index 942a2cf..10ded28 100644
+--- a/loader/wine.inf.in
++++ b/loader/wine.inf.in
+@@ -82,6 +82,7 @@ AddReg=\
+ Needs=BaseInstall
+ WineFakeDlls=FakeDllsWin32
+ AddReg=\
++    Packages,\
+     VCRuntime.ntx86,\
+     VersionInfo
+ 
+@@ -96,6 +97,7 @@ Needs=BaseInstall
+ WineFakeDlls=FakeDllsWin64
+ AddReg=\
+     CurrentVersionWow64.ntamd64,\
++    Packages.ntamd64,\
+     VCRuntime.ntamd64,\
+     VersionInfo
+ 
+@@ -104,6 +106,7 @@ Needs=BaseInstall
+ WineFakeDlls=FakeDllsWin64
+ AddReg=\
+     CurrentVersionWow64.ntarm64,\
++    Packages.ntarm64,\
+     VCRuntime.ntamd64,\
+     VCRuntime.ntarm64,\
+     VersionInfo
+@@ -125,6 +128,7 @@ AddReg=\
+ Needs=BaseWow64Install
+ AddReg=\
+     CurrentVersionWow64.ntx86,\
++    Packages.wow64,\
+     VCRuntime.ntamd64,\
+     VCRuntime.ntx86
+ 
+@@ -214,6 +218,7 @@ AddService=NDIS,0x800,NDISService
+ AddService=nsiproxy,0x800,NsiProxyService
+ 
+ [Strings]
++Packages="Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\PackageRepository\Packages"
+ MciExtStr="Software\Microsoft\Windows NT\CurrentVersion\MCI Extensions"
+ Mci32Str="Software\Microsoft\Windows NT\CurrentVersion\MCI32"
+ CurrentVersion="Software\Microsoft\Windows\CurrentVersion"
+@@ -637,6 +642,18 @@ HKCU,Software\Microsoft\Windows\Shell\Associations\UrlAssociations\ftp\UserChoic
+ HKCU,Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice,"ProgId",,"http"
+ HKCU,Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice,"ProgId",,"https"
+ 
++[Packages]
++HKLM,"%Packages%\Microsoft.VCLibs.140.00_14.0.29231.0_x86__8wekyb3d8bbwe","Path",0x00020002,"%SystemRoot%\system32"
++
++[Packages.ntamd64]
++HKLM,"%Packages%\Microsoft.VCLibs.140.00_14.0.29231.0_x64__8wekyb3d8bbwe","Path",0x00020002,"%SystemRoot%\system32"
++
++[Packages.wow64]
++HKLM,"%Packages%\Microsoft.VCLibs.140.00_14.0.29231.0_x86__8wekyb3d8bbwe","Path",0x00020002,"%SystemRoot%\syswow64"
++
++[Packages.ntarm64]
++HKLM,"%Packages%\Microsoft.VCLibs.140.00_14.0.29231.0_arm64__8wekyb3d8bbwe","Path",0x00020002,"%SystemRoot%\system32"
++
+ [OLE]
+ HKLM,"Software\Microsoft\OLE","EnableDCOM",,"Y"
+ HKLM,"Software\Microsoft\OLE","EnableRemoteConnect",,"N"
+diff --git a/server/msync.c b/server/msync.c
+index eecf9b3..01cbb39 100644
+--- a/server/msync.c
++++ b/server/msync.c
+@@ -177,7 +177,13 @@ static inline struct tid_node *pool_alloc(void)
+ {
+     if (pool->count == 0)
+     {
+-        fprintf( stderr, "msync: warn: node memory pool exhausted\n" );
++        static int warned;
++        /* Once: it used to print on every allocation past the pool, millions of lines. */
++        if (!warned)
++        {
++            warned = 1;
++            fprintf( stderr, "msync: warn: node memory pool exhausted\n" );
++        }
+         return malloc( sizeof(struct tid_node) );
+     }
+     return pool->free_nodes[--pool->count];
+@@ -508,7 +514,7 @@ static void *mach_message_pump( void *args )
+             val = __atomic_load_n( &obj->low, __ATOMIC_SEQ_CST );
+             if ((is_mutex && (val == 0 || val == ~0 || val == tid)) || (!is_mutex && val != 0))
+             {
+-                if (i > 1) unregister_wait( &receive_message, tid, i );
++                if (i > 0) unregister_wait( &receive_message, tid, i );  /* objects 0..i-1 were added above */
+                 wake_tid( tid );
+                 break;
+             }
