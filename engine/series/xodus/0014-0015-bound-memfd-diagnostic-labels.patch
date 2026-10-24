@@ -1,7 +1,7 @@
 From 3439b766d8474da42c3e6a04ca878d654831046f Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:34 +0300
-Subject: [PATCH 14/29] 0015-bound-memfd-diagnostic-labels
+Subject: [PATCH 14/30] 0015-bound-memfd-diagnostic-labels
 
 From Ferestre's patches/xodus-cli.
 ---

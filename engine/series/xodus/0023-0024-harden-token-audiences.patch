@@ -1,7 +1,7 @@
 From 830f5cc6a842408a0cb254851f588c2665137641 Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:35 +0300
-Subject: [PATCH 23/29] 0024-harden-token-audiences
+Subject: [PATCH 23/30] 0024-harden-token-audiences
 
 From Ferestre's patches/xodus-cli.
 ---

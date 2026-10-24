@@ -1,7 +1,7 @@
 From 99ad56f2aa162bceee52b289c074402a45c15c34 Mon Sep 17 00:00:00 2001
 From: Dungeons for Mac port <port@dungeons-for-mac>
 Date: Sat, 24 Oct 2026 23:13:38 +0300
-Subject: [PATCH 29/29] run: Mount the macOS RAM disk with diskutil
+Subject: [PATCH 29/30] run: Mount the macOS RAM disk with diskutil
 
 /sbin/mount needs root for a user, so the run path failed on a normal Mac account. diskutil erasevolume formats and mounts the hdiutil RAM device as the user; hdiutil detach -force unmounts and frees it.
 ---

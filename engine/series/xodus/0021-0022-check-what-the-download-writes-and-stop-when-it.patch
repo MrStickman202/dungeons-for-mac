@@ -1,7 +1,7 @@
 From b6928fd6bd53f8aebc19bbe9eb2965ac97085d19 Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:35 +0300
-Subject: [PATCH 21/29] 
+Subject: [PATCH 21/30] 
  0022-check-what-the-download-writes-and-stop-when-it-fails
 
 From Ferestre's patches/xodus-cli.

@@ -972,6 +972,13 @@ cmd_diag() {
     echo; echo "== settings"; cat "$CONF" 2>/dev/null
     echo; echo "== engine"; ls -la "$ENG" "$ENG/renderers/dxmt/wine/x86_64-windows" 2>/dev/null
     echo; echo "== game folder"; ls -la "$(conf_get game_root "")" 2>/dev/null
+    if [ -x "$XCLI" ] && [ -d "$STORE_DIR" ]; then
+      echo; echo "== store package identity"
+      c=$(store_config); [ -n "$c" ] && tr -d '\r' < "$c" | grep -oiE '(TitleId|MSAAppId|StoreId|Identity Name|Executable Name)="?[^" >]*' | sort -u
+      echo; echo "== xbl-check (Xbox Live sign-in self-test; prints no tokens)"
+      client_env
+      "$XCLI" xbl-check "$STORE_DIR" 2>&1 | tail -n 60
+    fi
   } > "$dir/DungeonsForMac-diagnostics/summary.txt" 2>&1
   cp "$LOGS"/*.log "$dir/DungeonsForMac-diagnostics/" 2>/dev/null
   out="$HOME/Desktop/DungeonsForMac-diagnostics-$stamp.zip"

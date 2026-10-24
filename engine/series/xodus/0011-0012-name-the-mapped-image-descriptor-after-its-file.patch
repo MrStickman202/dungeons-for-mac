@@ -1,7 +1,7 @@
 From 2edeeffa67d8c13397edfe80bbd7ec321c07981c Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:33 +0300
-Subject: [PATCH 11/29] 0012-name-the-mapped-image-descriptor-after-its-file
+Subject: [PATCH 11/30] 0012-name-the-mapped-image-descriptor-after-its-file
 
 From Ferestre's patches/xodus-cli.
 ---

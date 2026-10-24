@@ -1,7 +1,7 @@
 From d164a5992ca250a19e78dee36decfce7793723c1 Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:35 +0300
-Subject: [PATCH 20/29] 0021-scope-service-tokens-to-the-bound-title
+Subject: [PATCH 20/30] 0021-scope-service-tokens-to-the-bound-title
 
 From Ferestre's patches/xodus-cli.
 ---

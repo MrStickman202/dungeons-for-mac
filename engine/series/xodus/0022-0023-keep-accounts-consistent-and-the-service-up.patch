@@ -1,7 +1,7 @@
 From 1242de3984cf1c5fec163e1736c1287b072f77f0 Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:35 +0300
-Subject: [PATCH 22/29] 0023-keep-accounts-consistent-and-the-service-up
+Subject: [PATCH 22/30] 0023-keep-accounts-consistent-and-the-service-up
 
 From Ferestre's patches/xodus-cli.
 ---

@@ -1,7 +1,7 @@
 From 090ad0f3d20dff687d0ef2d2c20d5f8d79e03ffa Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:34 +0300
-Subject: [PATCH 16/29] 0017-fetch-license-tokens-in-the-service
+Subject: [PATCH 16/30] 0017-fetch-license-tokens-in-the-service
 
 From Ferestre's patches/xodus-cli.
 ---

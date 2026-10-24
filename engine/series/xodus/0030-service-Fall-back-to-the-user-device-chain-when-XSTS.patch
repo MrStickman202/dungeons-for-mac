@@ -1,0 +1,78 @@
+From 4763a895e7a4d8b463ddcc51efde21805d56c667 Mon Sep 17 00:00:00 2001
+From: Dungeons for Mac port <port@dungeons-for-mac>
+Date: Sun, 25 Oct 2026 01:11:11 +0300
+Subject: [PATCH 30/30] service: Fall back to the user/device chain when XSTS
+ answers 401 to a title claim
+
+Minecraft Dungeons (Windows title authentication, no MSAAppId) has its title claim refused with 401 and XErr 0x8015DC1E, while the account itself is fine (profile and social probes succeed). Treat 401 like 400/403 for the existing no-title-claim retry, and let endpoint discovery use the same fallback.
+---
+ crates/xodus-service/src/connection/xml.rs | 42 +++++++++++++++++++---
+ 1 file changed, 38 insertions(+), 4 deletions(-)
+
+diff --git a/crates/xodus-service/src/connection/xml.rs b/crates/xodus-service/src/connection/xml.rs
+index 1a0b181..1413fde 100644
+--- a/crates/xodus-service/src/connection/xml.rs
++++ b/crates/xodus-service/src/connection/xml.rs
+@@ -223,7 +223,7 @@ async fn title_endpoints_for(
+             || async {
+                 let signer = xodus::api::xbox::RequestSigner::from_pkcs8(&identity.key_pkcs8)
+                     .ok_or_else(|| "invalid title signing key".to_string())?;
+-                let xsts = xodus::api::xbox::request_xsts_token(
++                let claimed = xodus::api::xbox::request_xsts_token(
+                     client,
+                     identity.user_token.clone(),
+                     Some(identity.device_token.clone()),
+@@ -231,8 +231,38 @@ async fn title_endpoints_for(
+                     "http://xboxlive.com",
+                     Some(&signer),
+                 )
+-                .await
+-                .map_err(|e| format!("title discovery authorization failed: {e}"))?;
++                .await;
++                let xsts = match claimed {
++                    Ok(token) => token,
++                    // Some Windows titles (Minecraft Dungeons, XErr 0x8015DC1E) have
++                    // their title claim refused with 401 while the user/device chain is
++                    // accepted. Discover under that chain rather than failing outright.
++                    Err(e)
++                        if matches!(
++                            e.status(),
++                            Some(
++                                reqwest::StatusCode::BAD_REQUEST
++                                    | reqwest::StatusCode::UNAUTHORIZED
++                                    | reqwest::StatusCode::FORBIDDEN
++                            )
++                        ) =>
++                    {
++                        tracing::warn!(
++                            "title {title_id}: title claim refused ({e}); discovering endpoints without it"
++                        );
++                        xodus::api::xbox::request_xsts_token(
++                            client,
++                            identity.user_token.clone(),
++                            Some(identity.device_token.clone()),
++                            None,
++                            "http://xboxlive.com",
++                            Some(&signer),
++                        )
++                        .await
++                        .map_err(|e| format!("title discovery authorization failed: {e}"))?
++                    }
++                    Err(e) => return Err(format!("title discovery authorization failed: {e}")),
++                };
+                 let authorization = xodus::api::xbox::get_xsts_auth_header(xsts);
+                 let endpoints =
+                     xodus::api::xbox::title::get_title_endpoints(client, &authorization, &signer)
+@@ -674,7 +704,11 @@ async fn xsts_token_with(
+                 if !refused
+                     && matches!(
+                         e.status(),
+-                        Some(reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::FORBIDDEN)
++                        Some(
++                            reqwest::StatusCode::BAD_REQUEST
++                                | reqwest::StatusCode::UNAUTHORIZED
++                                | reqwest::StatusCode::FORBIDDEN
++                        )
+                     ) =>
+             {
+                 // Some audiences accept the user/device chain only. Retry

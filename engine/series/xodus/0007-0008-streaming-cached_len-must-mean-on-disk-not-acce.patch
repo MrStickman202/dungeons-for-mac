@@ -1,7 +1,7 @@
 From 95e7d29b9074d8d86c7f64f3bd795dd7fa5275fb Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:33 +0300
-Subject: [PATCH 07/29] 
+Subject: [PATCH 07/30] 
  0008-streaming-cached_len-must-mean-on-disk-not-accepted-
 
 From Ferestre's patches/xodus-cli.

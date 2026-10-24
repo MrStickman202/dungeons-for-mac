@@ -20,7 +20,26 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "14.0"
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: reuse the published engine when its inputs are unchanged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          name=$(gh release view latest-build -R "${{ github.repository }}" --json name -q .name 2>/dev/null || true)
+          built=$(printf '%s' "$name" | grep -oE '[0-9a-f]{7}\)?$' | tr -d ')')
+          if [ -n "$built" ] && git cat-file -e "$built^{commit}" 2>/dev/null \
+             && [ "$(git rev-parse "$built:engine/series/wine")" = "$(git rev-parse HEAD:engine/series/wine)" ] \
+             && [ "$(git rev-parse "$built:engine/inputs.json")" = "$(git rev-parse HEAD:engine/inputs.json)" ]; then
+            gh release download latest-build -R "${{ github.repository }}" -p 'dfm-engine.tar.gz*' \
+              && shasum -a 256 -c dfm-engine.tar.gz.sha256 \
+              && echo "REUSE=true" >> "$GITHUB_ENV" && echo "reusing the engine built at $built"
+          else
+            echo "engine inputs changed since '${built:-none}'; building"
+          fi
       - name: source
+        if: env.REUSE != 'true'
         run: |
           set -euo pipefail
           exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
@@ -30,6 +49,7 @@ jobs:
           echo "$(awk '{print $1}' wine.sha)  wine.tar.xz" | shasum -a 256 -c -
           mkdir -p src && tar -xJf wine.tar.xz -C src
       - name: patch series
+        if: env.REUSE != 'true'
         run: |
           set -euo pipefail
           exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
@@ -44,6 +64,7 @@ jobs:
           grep -q 'dlls/xgameruntime' configure.ac
           test -f dlls/xgameruntime/xgameruntime.spec
       - name: toolchain
+        if: env.REUSE != 'true'
         run: |
           set -euo pipefail
           exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
@@ -51,6 +72,7 @@ jobs:
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
       - name: regenerate configure
+        if: env.REUSE != 'true'
         run: |
           set -euo pipefail
           exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
@@ -60,11 +82,13 @@ jobs:
           autoreconf -f
           grep -q 'dlls/xgameruntime' configure
       - uses: actions/cache@v4
+        if: env.REUSE != 'true'
         with:
           path: ~/Library/Caches/ccache
           key: ccache-engine-${{ hashFiles('engine/series/wine/**') }}
           restore-keys: ccache-engine-
       - name: configure and build
+        if: env.REUSE != 'true'
         run: |
           set -euo pipefail
           exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
@@ -84,6 +108,7 @@ jobs:
           make -j"$(sysctl -n hw.ncpu)"
           make install-lib
       - name: package
+        if: env.REUSE != 'true'
         run: |
           set -euo pipefail
           exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
