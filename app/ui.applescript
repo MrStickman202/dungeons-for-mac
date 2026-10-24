@@ -36,9 +36,9 @@ on dlg(msg, btns, defBtn)
 	return button returned of r
 end dlg
 
-on valueFor(raw, k)
+on valueFor(rawText, k)
 	set keyPrefix to k & "="
-	repeat with ln in (paragraphs of raw)
+	repeat with ln in (paragraphs of rawText)
 		set t to ln as text
 		if t starts with keyPrefix then
 			if (length of t) > (length of keyPrefix) then
@@ -180,19 +180,19 @@ end reportResult
 -- ---------------------------------------------------------------------------
 on mainLoop()
 	repeat
-		set st to my core("status")
-		if (my valueFor(st, "busy")) is "1" then
+		set statusRaw to my core("status")
+		if (my valueFor(statusRaw, "busy")) is "1" then
 			set res to my runJob("", "Dungeons for Mac is working")
 			my reportResult(res, "Done.")
-		else if (my valueFor(st, "engine")) is not "1" then
+		else if (my valueFor(statusRaw, "engine")) is not "1" then
 			set b to my dlg(my welcomeText(), {"Quit", "Set Up"}, "Set Up")
 			if b is "Quit" then return
 			if my preflightOK() then
 				set res to my runJob("setup", "Setting up Dungeons for Mac")
 				my reportResult(res, "Setup finished.")
 			end if
-		else if (my valueFor(st, "game")) is not "1" then
-			if (my valueFor(st, "signed_in")) is not "1" then
+		else if (my valueFor(statusRaw, "game")) is not "1" then
+			if (my valueFor(statusRaw, "signed_in")) is not "1" then
 				set b to my dlg(my signInText(), {"Quit", "More...", "Sign In"}, "Sign In")
 				if b is "Quit" then return
 				if b is "More..." then
@@ -212,7 +212,7 @@ on mainLoop()
 				end if
 			end if
 		else
-			set b to my dlg(my readyText(st), {"More...", "Settings...", "Play"}, "Play")
+			set b to my dlg(my readyText(statusRaw), {"More...", "Settings...", "Play"}, "Play")
 			if b is "Play" then
 				if my startGame() then return
 			else if b is "Settings..." then
@@ -240,17 +240,17 @@ on addGameText()
 	return "Setup is done. Now add the game." & return & return & "You need the Launcher version of Minecraft Dungeons copied from a Windows PC: the folder that contains Dungeons.exe. A USB drive or a network share both work." & return & return & "Not sure how? Choose More... then How to copy the game from your PC."
 end addGameText
 
-on readyText(st)
+on readyText(statusRaw)
 	set t to "Ready to play Minecraft Dungeons." & return & return
-	set t to t & "Graphics: " & my rendererLabel(my valueFor(st, "renderer")) & return
-	set t to t & "Frame cap: " & my fpsLabel(my valueFor(st, "fps")) & return
-	set t to t & "Sharp mode: " & my onOff(my valueFor(st, "sharp"))
-	if (my valueFor(st, "running")) is "1" then
+	set t to t & "Graphics: " & my rendererLabel(my valueFor(statusRaw, "renderer")) & return
+	set t to t & "Frame cap: " & my fpsLabel(my valueFor(statusRaw, "fps")) & return
+	set t to t & "Sharp mode: " & my onOff(my valueFor(statusRaw, "sharp"))
+	if (my valueFor(statusRaw, "running")) is "1" then
 		set t to t & return & return & "The game is running right now."
 	else
-		set lastCode to my valueFor(st, "last_code")
-		set lastSecs to my valueFor(st, "last_secs")
-		if lastCode is not "" and lastCode is not "0" and (my valueFor(st, "launch")) is "direct" then
+		set lastCode to my valueFor(statusRaw, "last_code")
+		set lastSecs to my valueFor(statusRaw, "last_secs")
+		if lastCode is not "" and lastCode is not "0" and (my valueFor(statusRaw, "launch")) is "direct" then
 			set wasQuick to false
 			try
 				if (lastSecs as integer) < 90 then set wasQuick to true
@@ -354,8 +354,8 @@ end howToText
 -- ---------------------------------------------------------------------------
 on settingsMenu()
 	repeat
-		set st to my core("status")
-		set opts to {"Graphics: " & my rendererLabel(my valueFor(st, "renderer")), "Frame rate cap: " & my fpsLabel(my valueFor(st, "fps")), "Sharp mode (MetalFX upscaling): " & my onOff(my valueFor(st, "sharp")), "FPS counter (Metal HUD): " & my onOff(my valueFor(st, "hud")), "Start method: " & my launchLabel(my valueFor(st, "launch")), "Sync mode: " & my valueFor(st, "sync"), "Extra launch options: " & my argsLabel(my valueFor(st, "args")), "Reset all settings"}
+		set statusRaw to my core("status")
+		set opts to {"Graphics: " & my rendererLabel(my valueFor(statusRaw, "renderer")), "Frame rate cap: " & my fpsLabel(my valueFor(statusRaw, "fps")), "Sharp mode (MetalFX upscaling): " & my onOff(my valueFor(statusRaw, "sharp")), "FPS counter (Metal HUD): " & my onOff(my valueFor(statusRaw, "hud")), "Start method: " & my launchLabel(my valueFor(statusRaw, "launch")), "Sync mode: " & my valueFor(statusRaw, "sync"), "Extra launch options: " & my argsLabel(my valueFor(statusRaw, "args")), "Reset all settings"}
 		set pick to choose from list opts with title "Dungeons for Mac" with prompt "Choose a setting to change:" OK button name "Change" cancel button name "Done"
 		if pick is false then return
 		set pick to item 1 of pick
@@ -384,14 +384,14 @@ on settingsMenu()
 				end if
 			end if
 		else if pick starts with "Sharp" then
-			if (my valueFor(st, "sharp")) is "1" then
+			if (my valueFor(statusRaw, "sharp")) is "1" then
 				my core("set sharp 0")
 			else
 				set b to my dlg("Sharp mode keeps the game rendering at the normal size and uses Apple's MetalFX to upscale it to full Retina resolution. Sharper text and edges for a small GPU cost." & return & return & "Works with the DXMT graphics backend.", {"Back", "Turn On"}, "Turn On")
 				if b is "Turn On" then my core("set sharp 1")
 			end if
 		else if pick starts with "FPS counter" then
-			if (my valueFor(st, "hud")) is "1" then
+			if (my valueFor(statusRaw, "hud")) is "1" then
 				my core("set hud 0")
 			else
 				my core("set hud 1")
@@ -418,7 +418,7 @@ on settingsMenu()
 				end if
 			end if
 		else if pick starts with "Extra" then
-			set cur to my valueFor(st, "args")
+			set cur to my valueFor(statusRaw, "args")
 			set d to display dialog "Extra command-line options for the game (advanced). Leave empty for none." default answer cur buttons {"Back", "Save"} default button "Save" with title "Dungeons for Mac"
 			if button returned of d is "Save" then my core("set args " & quoted form of (text returned of d))
 		else if pick starts with "Reset" then
@@ -492,8 +492,8 @@ on aboutText()
 end aboutText
 
 on launcherMenu()
-	set st to my core("status")
-	if (my valueFor(st, "launcher")) is "1" then
+	set statusRaw to my core("status")
+	if (my valueFor(statusRaw, "launcher")) is "1" then
 		set b to my dlg("The Minecraft Launcher is installed in the Windows layer." & return & return & "1. Open it, sign in and install Minecraft Dungeons." & return & "2. Close the launcher when the download finishes." & return & "3. Come back here and choose Find Installed Game.", {"Back", "Find Installed Game", "Open Launcher"}, "Open Launcher")
 		if b is "Open Launcher" then
 			set r to my core("launcher-run")
