@@ -73,6 +73,20 @@ VC86_SHA="${DFM_TEST_VC86_SHA:-0c09f2611660441084ce0df425c51c11e147e6447963c3690
 MCL_URL="https://launcher.mojang.com/download/MinecraftInstaller.msi"
 
 # ---------------------------------------------------------------------------
+# Microsoft Store (MSIXVC) path: Xodus client + the Dungeons for Mac engine,
+# both built by github.com/MrStickman202/dungeons-for-mac. The engine is Wine
+# from CrossOver 26.3 with Highball's, Xodus's and Ferestre's patches and
+# xgameruntime (the Xbox game runtime). Checksums come with each release.
+# ---------------------------------------------------------------------------
+DFM_BUILDS="${DFM_BUILDS:-https://github.com/MrStickman202/dungeons-for-mac/releases/download/latest-build}"
+STORE_PRODUCT="9P8MK4NC0LJB"          # Minecraft Dungeons for Windows (Microsoft.Lovika)
+CLIENT_DIR="$AS/client"
+XCLI="$CLIENT_DIR/xodus-cli"
+XSVC="$CLIENT_DIR/xodus-service"
+STORE_DIR="$AS/games/minecraft-dungeons-store"
+STORE_ENGINE_MARK="$ENG/.dfm-store-engine"
+
+# ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
 mkdirs() { mkdir -p "$AS" "$DL" "$STATE" "$LOGS" 2>/dev/null; }
@@ -450,11 +464,13 @@ job_setup() {
   if [ ! -f "$READY_MARK" ] || [ "$(cat "$READY_MARK")" != "$ENGINE_ID" ]; then
     install_engine || return 1
   fi
+  install_store_engine || return 1
+  install_client || return 1
   progress 86 "Preparing the Windows environment..."
   make_prefix || return 1
   install_vcredist || return 1
   progress 100 "Done"
-  okmsg "Setup finished. Next, add your Minecraft Dungeons game folder."
+  okmsg "Setup finished. Next, sign in with the Microsoft account that owns Minecraft Dungeons."
   return 0
 }
 
@@ -606,6 +622,176 @@ job_import() { # folder copy|move [force]
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# Microsoft Store copy
+# ---------------------------------------------------------------------------
+fetch_build() { # file dest label from to   (sha from <file>.sha256 in the same release)
+  local sha
+  sha=$(curl -fsSL --retry 3 "$DFM_BUILDS/$1.sha256" 2>>"$LOGS/download.log" | awk '{print $1}')
+  case "$sha" in [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;; *)
+    fail "No Mac build is published yet (github.com/MrStickman202/dungeons-for-mac). Try again later."; return 1 ;; esac
+  printf '%s' "$sha" > "$2.expected"
+  download "$DFM_BUILDS/$1" "$2" "$sha" 0 "$3" "$4" "$5"
+}
+
+install_store_engine() { # swap Highball's Wine for the Dungeons for Mac build (keeps DXMT etc.)
+  local tmp have want
+  want=$(curl -fsSL --retry 3 "$DFM_BUILDS/dfm-engine.tar.gz.sha256" 2>/dev/null | awk '{print $1}')
+  have=$(cat "$STORE_ENGINE_MARK" 2>/dev/null)
+  if [ -n "$have" ] && { [ -z "$want" ] || [ "$have" = "$want" ]; }; then return 0; fi
+  fetch_build dfm-engine.tar.gz "$DL/dfm-engine.tar.gz" "Downloading the Xbox-capable engine" 2 40 || return 1
+  want=$(cat "$DL/dfm-engine.tar.gz.expected")
+  tmp=$(mktemp -d "$AS/unpack.XXXXXX") || { fail "Couldn't create a temporary folder."; return 1; }
+  progress -1 "Unpacking the engine..."
+  if ! tar -xzf "$DL/dfm-engine.tar.gz" -C "$tmp" >> "$LOGS/setup.log" 2>&1 \
+     || [ ! -x "$tmp/engine/bin/wine" ] || [ ! -f "$tmp/engine/lib/wine/x86_64-windows/xgameruntime.dll" ]; then
+    rm -rf "$tmp"; fail "The engine download looks incomplete."; return 1
+  fi
+  stop_server
+  rm -rf "$ENG/engine.old"
+  [ -d "$ENG/engine" ] && mv "$ENG/engine" "$ENG/engine.old"
+  mv "$tmp/engine" "$ENG/engine" || { [ -d "$ENG/engine.old" ] && mv "$ENG/engine.old" "$ENG/engine"; rm -rf "$tmp"; fail "Couldn't put the engine in place."; return 1; }
+  rm -rf "$ENG/engine.old" "$tmp" "$DL/dfm-engine.tar.gz" "$DL/dfm-engine.tar.gz.expected"
+  printf '%s\n' "$want" > "$STORE_ENGINE_MARK"
+  rm -f "$PREFIX_MARK"     # the new Wine build updates the prefix once
+  log "store engine $want installed"
+}
+
+install_client() {
+  local want have tmp
+  want=$(curl -fsSL --retry 3 "$DFM_BUILDS/dfm-client.tar.gz.sha256" 2>/dev/null | awk '{print $1}')
+  have=$(cat "$CLIENT_DIR/.sha" 2>/dev/null)
+  if [ -x "$XCLI" ] && [ -n "$have" ] && { [ -z "$want" ] || [ "$have" = "$want" ]; }; then return 0; fi
+  fetch_build dfm-client.tar.gz "$DL/dfm-client.tar.gz" "Downloading the Microsoft sign-in client" 40 45 || return 1
+  want=$(cat "$DL/dfm-client.tar.gz.expected")
+  tmp=$(mktemp -d "$AS/unpack.XXXXXX") || return 1
+  tar -xzf "$DL/dfm-client.tar.gz" -C "$tmp" >> "$LOGS/setup.log" 2>&1 && [ -x "$tmp/client/xodus-cli" ] \
+    || { rm -rf "$tmp"; fail "The sign-in client download looks incomplete."; return 1; }
+  rm -rf "$CLIENT_DIR"; mv "$tmp/client" "$CLIENT_DIR"; rm -rf "$tmp" "$DL/dfm-client.tar.gz" "$DL/dfm-client.tar.gz.expected"
+  if is_mac; then /usr/bin/xattr -dr com.apple.quarantine "$CLIENT_DIR" 2>/dev/null; fi
+  printf '%s\n' "$want" > "$CLIENT_DIR/.sha"
+}
+
+client_env() { # isolated runtime/state folders for the client and its service
+  export XODUS_RUNTIME_DIR="$AS/run"
+  export XDG_STATE_HOME="$AS/state/xodus" XDG_DATA_HOME="$AS/state/xodus-data" XDG_CACHE_HOME="$AS/state/xodus-cache"
+  mkdir -p "$XODUS_RUNTIME_DIR" "$XDG_STATE_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
+  chmod 700 "$XODUS_RUNTIME_DIR" 2>/dev/null
+}
+
+service_up() {
+  [ -S "$AS/run/xodus.sock" ] && pgrep -f "$XSVC" >/dev/null 2>&1
+}
+
+start_service() {
+  client_env
+  service_up && return 0
+  rm -f "$AS/run/xodus.sock"
+  ( trap '' HUP; exec "$XSVC" ) >> "$LOGS/xodus-service.log" 2>&1 < /dev/null &
+  local i=0
+  while [ $i -lt 20 ] && [ ! -S "$AS/run/xodus.sock" ]; do sleep 0.5; i=$((i + 1)); done
+  [ -S "$AS/run/xodus.sock" ]
+}
+
+store_config() { find "$STORE_DIR" -maxdepth 1 -type f -iname 'microsoftgame.config' 2>/dev/null | head -n 1; }
+
+store_exe() { # first <Executable Name="..."> in MicrosoftGame.config, as the package writes it
+  local cfg; cfg=$(store_config)
+  [ -n "$cfg" ] || return 1
+  tr -d '\r' < "$cfg" | tr '\n' ' ' | sed -n 's/.*<Executable[^>]*Name="\([^"]*\)".*/\1/p' | head -n 1
+}
+
+store_ready() { [ -f "$STORE_DIR/.xodus-streaming.msixvc" ] && [ -n "$(conf_get store_exe "")" ]; }
+
+job_signin() {
+  [ -x "$XCLI" ] || { fail "Run setup first."; return 1; }
+  client_env
+  progress -1 "Sign in with your Microsoft account in the window that opened..."
+  "$XCLI" login >> "$LOGS/signin.log" 2>&1
+  local rc=$? who
+  who=$("$XCLI" account 2>>"$LOGS/signin.log" | head -n 3 | tr '\n' ' ')
+  if [ $rc -ne 0 ] || [ -z "$who" ]; then
+    fail "Sign-in didn't finish (code $rc). Try again, or choose More > Show Log."
+    return 1
+  fi
+  conf_set signed_in 1
+  okmsg "Signed in: $who"
+}
+
+job_storeinstall() {
+  [ -x "$XCLI" ] || { fail "Run setup first."; return 1; }
+  [ "$(conf_get signed_in 0)" = 1 ] || { fail "Sign in with your Microsoft account first."; return 1; }
+  local gb; gb=$(free_gb "$AS")
+  [ "${gb:-0}" -ge 14 ] || { fail "Downloading Minecraft Dungeons needs about 14 GB free (this Mac has ${gb:-0} GB)."; return 1; }
+  client_env
+  mkdir -p "$STORE_DIR"
+  progress 0 "Asking Microsoft for your copy of Minecraft Dungeons..."
+  : > "$LOGS/store-download.log"
+  ( XODUS_PROGRESS=json exec "$XCLI" streaming "$STORE_PRODUCT" "$STORE_DIR" ) > "$STATE/stream.out" 2>> "$LOGS/store-download.log" &
+  local pid=$! line done_b total pct
+  echo "$pid" > "$STATE/child.pid"
+  while kill -0 "$pid" 2>/dev/null; do
+    line=$(grep -o '"progress":{"done":[0-9]*,"total":[0-9]*' "$STATE/stream.out" 2>/dev/null | tail -n 1)
+    done_b=$(printf '%s' "$line" | sed -n 's/.*"done":\([0-9]*\).*/\1/p')
+    total=$(printf '%s' "$line" | sed -n 's/.*"total":\([0-9]*\).*/\1/p')
+    if [ -n "$total" ] && [ "$total" -gt 0 ] 2>/dev/null; then
+      pct=$(( done_b * 100 / total ))
+      progress "$pct" "Downloading Minecraft Dungeons from Microsoft - $(( done_b / 1048576 )) of $(( total / 1048576 )) MB"
+    fi
+    sleep 1
+  done
+  wait "$pid"; local rc=$?
+  rm -f "$STATE/child.pid"
+  cat "$STATE/stream.out" >> "$LOGS/store-download.log" 2>/dev/null
+  if [ $rc -ne 0 ] || [ ! -f "$STORE_DIR/.xodus-streaming.msixvc" ]; then
+    if grep -qiE 'licen[cs]e|entitle|not owned|forbidden|403' "$LOGS/store-download.log"; then
+      fail "Microsoft says this account doesn't own Minecraft Dungeons for Windows. Sign in with the account that bought it."
+    else
+      fail "The download stopped (code $rc). Press Download again to resume."
+    fi
+    return 1
+  fi
+  local exe; exe=$(store_exe)
+  [ -n "$exe" ] || { fail "Downloaded, but MicrosoftGame.config names no executable."; return 1; }
+  conf_set store_exe "$exe"
+  conf_set game_mode store
+  progress 100 "Done"
+  okmsg "Minecraft Dungeons is downloaded. Press Play!"
+}
+
+play_store() {
+  local exe glog
+  exe=$(conf_get store_exe "")
+  start_service || { echo "error|The Xbox sign-in service didn't start. Choose More > Show Log."; return 0; }
+  stop_server
+  rotate_logs
+  glog="$LOGS/game-$(date +%Y%m%d-%H%M%S).log"
+  printf 'Dungeons for Mac %s - Store copy, exe=%s\nrenderer=%s fps=%s sharp=%s sync=%s\n----\n' \
+    "$DFM_VERSION" "$exe" "$(conf_get renderer dxmt)" "$(conf_get fps 60)" "$(conf_get sharp 0)" "$(conf_get sync msync)" > "$glog"
+  rm -f "$STATE/last_exit"
+  mkdir -p "$AS/app"
+  printf '#!/bin/bash\nexec /bin/bash %s __wine "$@"\n' "'$SELF'" > "$AS/app/wine-shim.sh" && chmod 755 "$AS/app/wine-shim.sh"
+  cd "$STORE_DIR" || { echo "error|The game folder is missing."; return 0; }
+  (
+    trap '' HUP
+    start=$(date +%s)
+    # The client decrypts the game onto a RAM disk and starts "$SELF __wine",
+    # which sets the Metal/DXMT environment and execs this engine's wine.
+    "$XCLI" run -e "$exe" "$STORE_DIR" "$AS/app/wine-shim.sh"
+    code=$?
+    echo "$code $(( $(date +%s) - start ))" > "$STATE/last_exit"
+  ) >> "$glog" 2>&1 < /dev/null &
+  log "play (store): $exe"
+  echo "ok|Starting Minecraft Dungeons."
+}
+
+cmd_wine_shim() { # called by xodus-cli as its "wine": inherited fds stay open across exec
+  wine_env game
+  client_env
+  export WINE_GAMEINPUT=1
+  exec "$WINE" "$@"
+}
+
 cmd_find_game() { # look for a copy the Minecraft Launcher installed inside the prefix
   local exe
   exe=$(find "$PREFIX/drive_c" -path "$PREFIX/drive_c/windows" -prune -o -type f -iname "$SHIPPING_FIND" -print 2>/dev/null | head -n 1)
@@ -661,6 +847,12 @@ rotate_logs() { # keep the 4 newest game logs (plus the one about to start)
 cmd_play() {
   if [ ! -f "$READY_MARK" ] || [ ! -f "$PREFIX_MARK" ]; then echo "error|Setup hasn't finished yet."; return 0; fi
   local exe target args root glog
+  if [ "$(conf_get game_mode launcher)" = store ] && store_ready; then
+    if game_running || pgrep -f "$XCLI run" >/dev/null 2>&1; then echo "running|Minecraft Dungeons is already running."; return 0; fi
+    if job_alive; then echo "error|Wait for the current task to finish first."; return 0; fi
+    play_store
+    return 0
+  fi
   exe=$(conf_get game_exe "")
   if [ -z "$exe" ] || [ ! -f "$exe" ]; then echo "error|The game files are missing. Add the game folder again."; return 0; fi
   if game_running; then echo "running|Minecraft Dungeons is already running."; return 0; fi
@@ -808,7 +1000,7 @@ kill_tree() {
 cmd_start() { # job args...
   local job="$1"
   shift
-  case "$job" in setup|repair|import|mclauncher) ;; *) echo "error|unknown job $job"; return 0 ;; esac
+  case "$job" in setup|repair|import|mclauncher|signin|storeinstall) ;; *) echo "error|unknown job $job"; return 0 ;; esac
   mkdirs
   if job_alive; then echo "busy|Another task is running."; return 0; fi
   rm -f "$STATE/result" "$STATE/okmsg" "$STATE/errmsg"
@@ -862,6 +1054,7 @@ cmd_cancel() {
   if [ -x "$WINESERVER" ]; then wine_env setup; stop_server; fi
   rm -f "$STATE/job.pid" "$STATE/progress" "$STATE/result" "$STATE/child.pid"
   rm -rf "$AS"/unpack.* "$GAME_DIR.partial"
+  pkill -f "$XCLI streaming" 2>/dev/null
   log "job cancelled"
   echo "ok|cancelled"
 }
@@ -872,9 +1065,10 @@ cmd_cancel() {
 cmd_status() {
   local engine=0 game=0 running=0 busy=0 launcher=0 exe
   [ -f "$READY_MARK" ] && [ "$(cat "$READY_MARK")" = "$ENGINE_ID" ] \
-    && [ -f "$PREFIX_MARK" ] && [ -f "$VCRUN_MARK" ] && engine=1
+    && [ -f "$PREFIX_MARK" ] && [ -f "$VCRUN_MARK" ] && [ -f "$STORE_ENGINE_MARK" ] && [ -x "$XCLI" ] && engine=1
   exe=$(conf_get game_exe "")
   [ -n "$exe" ] && [ -f "$exe" ] && game=1
+  if [ "$(conf_get game_mode launcher)" = store ] && store_ready; then game=1; fi
   game_running && running=1
   job_alive && busy=1
   [ -f "$MCL_EXE" ] && launcher=1
@@ -883,6 +1077,8 @@ cmd_status() {
   echo "running=$running"
   echo "busy=$busy"
   echo "launcher=$launcher"
+  echo "signed_in=$(conf_get signed_in 0)"
+  echo "mode=$(conf_get game_mode launcher)"
   echo "renderer=$(conf_get renderer dxmt)"
   echo "fps=$(conf_get fps 60)"
   echo "sharp=$(conf_get sharp 0)"
@@ -937,6 +1133,7 @@ cmd="$1"
 mkdirs
 case "$cmd" in
   __job)          run_job "$@" ;;
+  __wine)         cmd_wine_shim "$@" ;;
   status)         cmd_status ;;
   preflight)      preflight ;;
   start)          cmd_start "$@" ;;

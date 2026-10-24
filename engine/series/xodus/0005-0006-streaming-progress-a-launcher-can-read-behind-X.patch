@@ -1,7 +1,7 @@
 From 5385a7fb178185d0fc133edc5779767be84b91f7 Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:32 +0300
-Subject: [PATCH 05/28] 
+Subject: [PATCH 05/29] 
  0006-streaming-progress-a-launcher-can-read-behind-XODUS_
 
 From Ferestre's patches/xodus-cli.

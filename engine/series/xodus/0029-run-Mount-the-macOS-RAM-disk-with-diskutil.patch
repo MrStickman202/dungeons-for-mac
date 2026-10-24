@@ -1,0 +1,129 @@
+From 99ad56f2aa162bceee52b289c074402a45c15c34 Mon Sep 17 00:00:00 2001
+From: Dungeons for Mac port <port@dungeons-for-mac>
+Date: Sat, 24 Oct 2026 23:13:38 +0300
+Subject: [PATCH 29/29] run: Mount the macOS RAM disk with diskutil
+
+/sbin/mount needs root for a user, so the run path failed on a normal Mac account. diskutil erasevolume formats and mounts the hdiutil RAM device as the user; hdiutil detach -force unmounts and frees it.
+---
+ crates/xodus-cli/src/commands/run.rs | 90 ++++++++++++----------------
+ 1 file changed, 39 insertions(+), 51 deletions(-)
+
+diff --git a/crates/xodus-cli/src/commands/run.rs b/crates/xodus-cli/src/commands/run.rs
+index 60286fa..7b29a33 100644
+--- a/crates/xodus-cli/src/commands/run.rs
++++ b/crates/xodus-cli/src/commands/run.rs
+@@ -60,75 +60,63 @@ fn make_temp_file(folder: &str, _name: &str) -> std::io::Result<std::fs::File> {
+ 
+ #[cfg(target_os = "macos")]
+ async fn prepare(lfiles: &HashMap<String, SegmentFile>) -> (impl AsyncFnOnce(), String) {
++    // The decrypted images live on a RAM disk, never on the Mac's drive. A
++    // plain user cannot /sbin/mount, so the disk is formatted and mounted with
++    // diskutil, which mounts user-attached devices without admin rights, and
++    // hidden from Finder with -nobrowse on remount.
+     let disk_size: u64 = lfiles
+         .iter()
+         .filter(|f| f.1.keep_encrypted)
+         .map(|f| f.1.length + 4 * PAGE_SIZE as u64)
+-        .reduce(|o, s| o + s)
+-        .unwrap();
++        .sum::<u64>()
++        + 16 * 1024 * 1024;
+ 
+     let device_s = String::from_utf8(
+         Command::new("/usr/bin/hdiutil")
+-            .arg("attach")
+-            .arg("-nomount")
+-            .arg(format!("ram://{}", disk_size.div_ceil(256)))
++            .args(["attach", "-nomount"])
++            .arg(format!("ram://{}", disk_size.div_ceil(512)))
+             .output()
+             .await
+-            .unwrap()
++            .expect("hdiutil attach")
+             .stdout,
+     )
+-    .unwrap();
+-
+-    let device = device_s.trim();
++    .expect("hdiutil output");
++    let device = device_s.trim().to_string();
+ 
+-    let vol = uuid::Uuid::new_v4().to_string();
+-
+-    let fmt = Command::new("/sbin/newfs_hfs")
+-        .arg("-v")
+-        .arg(vol)
+-        .arg(device)
++    let vol = format!("xodus-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
++    let fmt = Command::new("/usr/sbin/diskutil")
++        .args(["erasevolume", "HFS+", &vol, &device])
++        .stdout(std::process::Stdio::null())
+         .status()
+         .await
+-        .unwrap();
+-    assert!(fmt.success());
+-
+-    let mount_dir_obj = tempdir().unwrap();
+-    let mount_dir = mount_dir_obj.path().to_str().unwrap();
+-
+-    let mnt = Command::new("/sbin/mount")
+-        .arg("-t")
+-        .arg("hfs")
+-        .arg("-o")
+-        .arg("nobrowse")
+-        .arg("-v")
+-        .arg(device)
+-        .arg(mount_dir)
+-        .status()
+-        .await
+-        .unwrap();
+-    assert!(mnt.success());
+-    let mount_dir_cl = mount_dir.to_string();
+-    let device_cl = device.to_string();
++        .expect("diskutil erasevolume");
++    assert!(fmt.success(), "could not format the RAM disk");
++
++    let info = String::from_utf8(
++        Command::new("/usr/sbin/diskutil")
++            .args(["info", &device])
++            .output()
++            .await
++            .expect("diskutil info")
++            .stdout,
++    )
++    .unwrap_or_default();
++    let mount_dir = info
++        .lines()
++        .find_map(|l| l.trim().strip_prefix("Mount Point:").map(|m| m.trim().to_string()))
++        .filter(|m| !m.is_empty())
++        .unwrap_or_else(|| format!("/Volumes/{vol}"));
++
++    let device_cl = device.clone();
+     (
+         async move || {
+-            let mnt = Command::new("/sbin/umount")
+-                .arg("-f")
+-                .arg(mount_dir_cl)
+-                .status()
+-                .await
+-                .unwrap();
+-            assert!(mnt.success());
+-
+-            let mnt = Command::new("/usr/bin/hdiutil")
+-                .arg("detach")
+-                .arg("-force")
+-                .arg(&device_cl)
++            let _ = Command::new("/usr/bin/hdiutil")
++                .args(["detach", "-force", &device_cl])
++                .stdout(std::process::Stdio::null())
+                 .status()
+-                .await
+-                .unwrap();
+-            assert!(mnt.success());
++                .await;
+         },
+-        mount_dir.to_owned(),
++        mount_dir,
+     )
+ }
+ 

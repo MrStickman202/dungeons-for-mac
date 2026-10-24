@@ -23,6 +23,7 @@ jobs:
       - name: source
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           base=https://github.com/${{ github.repository }}/releases/download/src-crossover-26.3.0
           curl -sSfL -o wine.tar.xz "$base/wine-crossover-26.3.0.tar.xz"
           curl -sSfL -o wine.sha "$base/wine-crossover-26.3.0.tar.xz.sha256"
@@ -31,6 +32,7 @@ jobs:
       - name: patch series
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           cd src/wine
           for p in ../../engine/series/wine/*.patch; do
             git apply --whitespace=nowarn -p1 "$p" || { echo "::error::$(basename "$p") does not apply"; exit 1; }
@@ -39,12 +41,16 @@ jobs:
       - name: toolchain
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           brew install -q mingw-w64 bison flex autoconf automake pkg-config ccache gnutls freetype sdl2 libpng jpeg-turbo gstreamer molten-vk || true
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix flex)/bin" >> "$GITHUB_PATH"
       - name: regenerate configure
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
+          which autoreconf autoconf aclocal || true
+          autoconf --version | head -1 || true
           cd src/wine
           autoreconf -f
           grep -q 'dlls/xgameruntime' configure
@@ -56,6 +62,7 @@ jobs:
       - name: configure and build
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           mkdir -p build && cd build
           ../src/wine/configure \
             --prefix="$PWD/../out/engine" \
@@ -74,6 +81,7 @@ jobs:
       - name: package
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           test -x out/engine/bin/wine
           test -f out/engine/lib/wine/x86_64-windows/xgameruntime.dll
           mono=$(sed -n 's/^#define MONO_VERSION "\(.*\)"/\1/p' src/wine/dlls/appwiz.cpl/addons.c)
@@ -97,6 +105,18 @@ jobs:
           out/engine/bin/wine --version
           tar -C out -czf dfm-engine.tar.gz engine
           shasum -a 256 dfm-engine.tar.gz | tee dfm-engine.tar.gz.sha256
+      - name: publish log on failure
+        if: failure()
+        run: |
+          set -u
+          mkdir -p "$RUNNER_TEMP/logs"
+          tail -n 600 "$RUNNER_TEMP/ci.log" > "$RUNNER_TEMP/logs/engine.log" 2>/dev/null || echo "no log" > "$RUNNER_TEMP/logs/engine.log"
+          [ -f build/config.log ] && tail -n 200 build/config.log > "$RUNNER_TEMP/logs/engine-config.log"
+          cd "$RUNNER_TEMP/logs"
+          git init -q && git checkout -q -b ci-logs-engine
+          git -c user.name=ci -c user.email=ci@localhost add -A
+          git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs of run ${{ github.run_id }} (${GITHUB_SHA::7})"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-logs-engine
       - uses: actions/upload-artifact@v4
         with:
           name: engine
@@ -112,6 +132,7 @@ jobs:
       - name: source
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           commit=$(python3 -c 'import json;print(json.load(open("engine/inputs.json"))["xodus"]["commit"])')
           git init -q xodus && cd xodus
           git remote add origin https://github.com/xodus-gaming/xodus.git
@@ -130,10 +151,23 @@ jobs:
       - name: build
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           cd xodus
-          cargo build --release --locked -p xodus-cli -p xodus-service
+          cargo build --release -p xodus-cli -p xodus-service
           mkdir -p ../client && cp target/release/xodus-cli target/release/xodus-service ../client/
           cd .. && tar -czf dfm-client.tar.gz client && shasum -a 256 dfm-client.tar.gz | tee dfm-client.tar.gz.sha256
+      - name: publish log on failure
+        if: failure()
+        run: |
+          set -u
+          mkdir -p "$RUNNER_TEMP/logs"
+          tail -n 600 "$RUNNER_TEMP/ci.log" > "$RUNNER_TEMP/logs/client.log" 2>/dev/null || echo "no log" > "$RUNNER_TEMP/logs/client.log"
+          [ -f build/config.log ] && tail -n 200 build/config.log > "$RUNNER_TEMP/logs/client-config.log"
+          cd "$RUNNER_TEMP/logs"
+          git init -q && git checkout -q -b ci-logs-client
+          git -c user.name=ci -c user.email=ci@localhost add -A
+          git -c user.name=ci -c user.email=ci@localhost commit -q -m "logs of run ${{ github.run_id }} (${GITHUB_SHA::7})"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-logs-client
       - uses: actions/upload-artifact@v4
         with:
           name: client
@@ -152,7 +186,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           tag="build-$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA::7}"
           gh release create "$tag" -R "${{ github.repository }}" --prerelease --title "$tag" \
             --notes "Engine and client built by run ${{ github.run_id }} from ${GITHUB_SHA}. Source: this repository plus engine/inputs.json." \
+            dfm-engine.tar.gz dfm-engine.tar.gz.sha256 dfm-client.tar.gz dfm-client.tar.gz.sha256
+          # the app downloads from this fixed tag
+          gh release delete latest-build -R "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest-build -R "${{ github.repository }}" --prerelease --title "Latest build ($tag)" \
+            --notes "Same files as $tag." \
             dfm-engine.tar.gz dfm-engine.tar.gz.sha256 dfm-client.tar.gz dfm-client.tar.gz.sha256

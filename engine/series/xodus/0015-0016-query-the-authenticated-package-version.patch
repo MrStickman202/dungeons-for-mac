@@ -1,7 +1,7 @@
 From 9b10ee2e85b8751baba4b16440388c293202f8a8 Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:34 +0300
-Subject: [PATCH 15/28] 0016-query-the-authenticated-package-version
+Subject: [PATCH 15/29] 0016-query-the-authenticated-package-version
 
 From Ferestre's patches/xodus-cli.
 ---

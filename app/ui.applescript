@@ -192,12 +192,24 @@ on mainLoop()
 				my reportResult(res, "Setup finished.")
 			end if
 		else if (my valueFor(st, "game")) is not "1" then
-			set b to my dlg(my addGameText(), {"Quit", "More...", "Add Game Folder..."}, "Add Game Folder...")
-			if b is "Quit" then return
-			if b is "More..." then
-				if (my moreMenu()) is "quit" then return
+			if (my valueFor(st, "signed_in")) is not "1" then
+				set b to my dlg(my signInText(), {"Quit", "More...", "Sign In"}, "Sign In")
+				if b is "Quit" then return
+				if b is "More..." then
+					if (my moreMenu()) is "quit" then return
+				else
+					set res to my runJob("signin", "Signing in to Microsoft")
+					my reportResult(res, "Signed in.")
+				end if
 			else
-				my addGame()
+				set b to my dlg(my downloadText(), {"Quit", "More...", "Download"}, "Download")
+				if b is "Quit" then return
+				if b is "More..." then
+					if (my moreMenu()) is "quit" then return
+				else
+					set res to my runJob("storeinstall", "Downloading Minecraft Dungeons")
+					my reportResult(res, "Downloaded.")
+				end if
 			end if
 		else
 			set b to my dlg(my readyText(st), {"More...", "Settings...", "Play"}, "Play")
@@ -213,8 +225,16 @@ on mainLoop()
 end mainLoop
 
 on welcomeText()
-	return "Welcome! This sets up everything Minecraft Dungeons needs on this Mac:" & return & return & "- Wine 11 (built from CrossOver 26.3's code) to run the Windows game" & return & "- DXMT, which turns the game's Direct3D 11 into Apple Metal" & return & "- Microsoft's Visual C++ runtimes" & return & return & "It downloads about 450 MB and takes 5 to 10 minutes. Everything lives in one folder that Uninstall removes completely."
+	return "Welcome! This sets up everything your Microsoft Store copy of Minecraft Dungeons needs on this Mac:" & return & return & "- Wine 11 (built from CrossOver 26.3's code) with the Xbox game runtime" & return & "- DXMT, which turns the game's Direct3D 11 into Apple Metal" & return & "- the Microsoft sign-in and download client" & return & "- Microsoft's Visual C++ runtimes" & return & return & "It downloads about 800 MB and takes 5 to 15 minutes. Everything lives in one folder that Uninstall removes completely."
 end welcomeText
+
+on signInText()
+	return "Setup is done. Now sign in with the Microsoft account that bought Minecraft Dungeons in the Microsoft Store." & return & return & "A Microsoft sign-in window opens. Your password goes straight to Microsoft; the sign-in is kept in this Mac's Keychain." & return & return & "Note: this uses an unofficial Xbox client (Xodus). It only works for games your account owns."
+end signInText
+
+on downloadText()
+	return "Signed in." & return & return & "Next, Dungeons for Mac asks Microsoft for your copy of Minecraft Dungeons and downloads it (about 6 GB). If your account doesn't own it, Microsoft refuses and nothing is downloaded." & return & return & "You can stop and resume the download any time."
+end downloadText
 
 on addGameText()
 	return "Setup is done. Now add the game." & return & return & "You need the Launcher version of Minecraft Dungeons copied from a Windows PC: the folder that contains Dungeons.exe. A USB drive or a network share both work." & return & return & "Not sure how? Choose More... then How to copy the game from your PC."
@@ -411,11 +431,17 @@ end settingsMenu
 -- More
 -- ---------------------------------------------------------------------------
 on moreMenu()
-	set opts to {"Add or replace the game folder...", "How to copy the game from your PC", "Open the saves folder", "Back up saves to Documents", "Force-quit the game", "Repair the Windows layer...", "Minecraft Launcher (experimental)...", "Show log", "Create a diagnostic report", "About Dungeons for Mac", "Uninstall...", "Quit"}
+	set opts to {"Sign in again...", "Re-download / update the game...", "Add a Launcher-version game folder instead...", "How to copy the game from your PC", "Open the saves folder", "Back up saves to Documents", "Force-quit the game", "Repair the Windows layer...", "Minecraft Launcher (experimental)...", "Show log", "Create a diagnostic report", "About Dungeons for Mac", "Uninstall...", "Quit"}
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt "More options:" OK button name "Select" cancel button name "Back"
 	if pick is false then return "back"
 	set pick to item 1 of pick
-	if pick starts with "Add or replace" then
+	if pick starts with "Sign in again" then
+		set res to my runJob("signin", "Signing in to Microsoft")
+		my reportResult(res, "Signed in.")
+	else if pick starts with "Re-download" then
+		set res to my runJob("storeinstall", "Downloading Minecraft Dungeons")
+		my reportResult(res, "Downloaded.")
+	else if pick starts with "Add a Launcher" then
 		my addGame()
 	else if pick starts with "How to copy" then
 		my dlg(my howToText(), {"OK"}, "OK")

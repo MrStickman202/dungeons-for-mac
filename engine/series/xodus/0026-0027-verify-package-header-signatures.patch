@@ -1,7 +1,7 @@
 From 0d6b603fa1a424fd5eba4b1843a8d8fb21531d03 Mon Sep 17 00:00:00 2001
 From: Ferestre contributors <ferestre@users.noreply.github.com>
 Date: Sat, 24 Oct 2026 19:20:36 +0300
-Subject: [PATCH 26/28] 0027-verify-package-header-signatures
+Subject: [PATCH 26/29] 0027-verify-package-header-signatures
 
 From Ferestre's patches/xodus-cli.
 ---
