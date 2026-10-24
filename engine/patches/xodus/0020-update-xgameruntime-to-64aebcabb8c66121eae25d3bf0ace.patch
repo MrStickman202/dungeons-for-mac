@@ -1,0 +1,20 @@
+From b1dd32734a34472a28eb5be9922df06e07ac0834 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Pawe=C5=82=20Lidwin?= <lidwinpawel@gmail.com>
+Date: Fri, 7 Aug 2026 21:49:13 +0200
+Subject: [PATCH 20/20] update xgameruntime to
+ 64aebcabb8c66121eae25d3bf0ace4b582ebb0da
+
+---
+ dlls/xgameruntime | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/dlls/xgameruntime b/dlls/xgameruntime
+index d15b0de..64aebca 160000
+--- a/dlls/xgameruntime
++++ b/dlls/xgameruntime
+@@ -1 +1 @@
+-Subproject commit d15b0deae3d13f2503a94d61379e852078afe835
++Subproject commit 64aebcabb8c66121eae25d3bf0ace4b582ebb0da
+-- 
+2.43.0
+

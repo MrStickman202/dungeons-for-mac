@@ -1,0 +1,167 @@
+From 8032da4143a456bb2c07c28b927df1ae8832b2ae Mon Sep 17 00:00:00 2001
+From: Olivia Ryan <olivia.r.dev@gmail.com>
+Date: Thu, 26 Mar 2026 11:01:53 +0100
+Subject: [PATCH 15/20] windows.web: Support json object parsing.
+
+---
+ dlls/windows.web/json_value.c | 67 ++++++++++++++++++++++++++++++-----
+ dlls/windows.web/tests/web.c  |  7 ++--
+ 2 files changed, 64 insertions(+), 10 deletions(-)
+
+diff --git a/dlls/windows.web/json_value.c b/dlls/windows.web/json_value.c
+index a21f17e..42b3ae9 100644
+--- a/dlls/windows.web/json_value.c
++++ b/dlls/windows.web/json_value.c
+@@ -128,6 +128,7 @@ struct json_value
+         HSTRING string_value;
+         double number_value;
+         IJsonArray *array_value;
++        IJsonObject *object_value;
+     };
+ };
+ 
+@@ -178,6 +179,8 @@ static ULONG WINAPI json_value_Release( IJsonValue *iface )
+             WindowsDeleteString( impl->string_value );
+         else if (impl->json_value_type == JsonValueType_Array)
+             IJsonArray_Release( impl->array_value );
++        else if (impl->json_value_type == JsonValueType_Object)
++            IJsonObject_Release( impl->object_value );
+ 
+         free( impl );
+     }
+@@ -276,12 +279,14 @@ static HRESULT WINAPI json_value_GetObject( IJsonValue *iface, IJsonObject **val
+ {
+     struct json_value *impl = impl_from_IJsonValue( iface );
+ 
+-    FIXME( "iface %p, value %p stub!\n", iface, value );
++    TRACE( "iface %p, value %p\n", iface, value );
+ 
+     if (!value) return E_POINTER;
+     if (impl->json_value_type != JsonValueType_Object) return E_ILLEGAL_METHOD_CALL;
+ 
+-    return E_NOTIMPL;
++    IJsonObject_AddRef( impl->object_value );
++    *value = impl->object_value;
++    return S_OK;
+ }
+ 
+ static const struct IJsonValueVtbl json_value_vtbl =
+@@ -419,13 +424,57 @@ static HRESULT parse_json_array( struct json_buffer *json, IJsonArray **value )
+     return hr;
+ }
+ 
++static HRESULT parse_json_key_value( struct json_buffer *json, HSTRING *key, IJsonValue **value )
++{
++    HSTRING name;
++    HRESULT hr;
++
++    if (!json_buffer_take( json, L"\"", TRUE )) return WEB_E_INVALID_JSON_STRING;
++    if (FAILED(hr = parse_json_string( json, &name ))) return hr;
++
++    if (!json_buffer_take( json, L"\"", FALSE )) hr = WEB_E_INVALID_JSON_STRING;
++    else if (!json_buffer_take( json, L":", TRUE )) hr = WEB_E_INVALID_JSON_STRING;
++    else hr = parse_json_value( json, value );
++
++    if (FAILED(hr)) WindowsDeleteString( name );
++    else *key = name;
++    return hr;
++}
++
++static HRESULT parse_json_object( struct json_buffer *json, IJsonObject **value )
++{
++    IJsonObject *object;
++    HRESULT hr;
++
++    if (FAILED(hr = IActivationFactory_ActivateInstance( json_object_factory, (IInspectable**)&object ))) return hr;
++
++    while (json->len && *json->str != '}')
++    {
++        IJsonValue *value;
++        HSTRING key;
++
++        if (FAILED(hr = parse_json_key_value( json, &key, &value ))) break;
++        hr = IJsonObject_SetNamedValue( object, key, value );
++        WindowsDeleteString( key );
++        IJsonValue_Release( value );
++        if (FAILED(hr) || !json_buffer_take( json, L",", TRUE )) break;
++        if (json_buffer_take( json, L"}", TRUE ))
++        {
++            hr = WEB_E_INVALID_JSON_STRING;
++            break;
++        }
++    }
++
++    if (FAILED(hr)) IJsonObject_Release( object );
++    else *value = object;
++    return hr;
++}
++
+ static HRESULT parse_json_value( struct json_buffer *json, IJsonValue **value )
+ {
+     struct json_value *impl;
+     HRESULT hr = S_OK;
+ 
+-    /* FIXME: Handle all JSON edge cases */
+-
+     if (!(impl = calloc( 1, sizeof( *impl ) ))) return E_OUTOFMEMORY;
+     impl->IJsonValue_iface.lpVtbl = &json_value_vtbl;
+     impl->ref = 1;
+@@ -462,9 +511,11 @@ static HRESULT parse_json_value( struct json_buffer *json, IJsonValue **value )
+     }
+     else if (json_buffer_take( json, L"{", TRUE ))
+     {
+-        FIXME( "Object parsing not implemented!\n" );
+-        impl->json_value_type = JsonValueType_Object;
+-        if (!json_buffer_take( json, L"}", TRUE )) hr = WEB_E_INVALID_JSON_STRING;
++        if (SUCCEEDED(hr = parse_json_object( json, &impl->object_value )))
++        {
++            impl->json_value_type = JsonValueType_Object;
++            if (!json_buffer_take( json, L"}", TRUE )) hr = WEB_E_INVALID_JSON_STRING;
++        }
+     }
+     else
+     {
+@@ -503,7 +554,7 @@ static HRESULT WINAPI json_value_statics_Parse( IJsonValueStatics *iface, HSTRIN
+ {
+     HRESULT hr;
+ 
+-    FIXME( "iface %p, input %s, value %p semi-stub\n", iface, debugstr_hstring( input ), value );
++    TRACE( "iface %p, input %s, value %p\n", iface, debugstr_hstring( input ), value );
+ 
+     if (!value) return E_POINTER;
+     if (!input) return WEB_E_INVALID_JSON_STRING;
+diff --git a/dlls/windows.web/tests/web.c b/dlls/windows.web/tests/web.c
+index 8be4eb5..2d5bab4 100644
+--- a/dlls/windows.web/tests/web.c
++++ b/dlls/windows.web/tests/web.c
+@@ -163,7 +163,6 @@ static void check_json_( unsigned int line, IJsonValueStatics *json_value_static
+         return;
+     }
+ 
+-    todo_wine_if(expected_json_value_type == JsonValueType_Object)
+     ok_(__FILE__, line)( hr == S_OK, "got hr %#lx.\n", hr );
+     if (FAILED(hr)) return;
+     hr = IJsonValue_get_ValueType( json_value, &json_value_type );
+@@ -239,7 +238,6 @@ static void check_json_( unsigned int line, IJsonValueStatics *json_value_static
+             break;
+         case JsonValueType_Object:
+             hr = IJsonValue_GetObject( json_value, &json_object );
+-            todo_wine
+             ok_(__FILE__, line)( hr == S_OK, "got hr %#lx.\n", hr );
+             if (hr == S_OK) IJsonObject_Release( json_object );
+             break;
+@@ -466,6 +464,11 @@ static void test_JsonValueStatics(void)
+             "    \"Linux\": [\"Arch\", \"BTW\"]"
+             "";
+     check_json( json_value_statics, json, JsonValueType_Object, FALSE );
++    json = L"{"
++            "    \"Wine\": \"The Wine Project\","
++            "    \"Linux\": [\"Arch\", \"BTW\"],"
++            "}";
++    check_json( json_value_statics, json, JsonValueType_Object, FALSE );
+ 
+     ref = IJsonValueStatics_Release( json_value_statics );
+     ok( ref == 2, "got ref %ld.\n", ref );
+-- 
+2.43.0
+

@@ -1,0 +1,25 @@
+{
+  "wine": {
+    "name": "CrossOver 26.3.0 sources (LGPL)",
+    "url": "https://media.codeweavers.com/pub/crossover/source/crossover-sources-26.3.0.tar.gz",
+    "size": 149054023,
+    "sha256": "ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872",
+    "subdir": "sources/wine",
+    "note": "Same pin as Highball's Wine 11 engine (github.com/gauthierpiarrette/highball-engine)."
+  },
+  "xgameruntime": {
+    "repo": "https://github.com/xodus-gaming/xgameruntime",
+    "commit": "64aebcabb8c66121eae25d3bf0ace4b582ebb0da",
+    "note": "The commit xodus-gaming/wine b1dd327 and Ferestre's patch series pin."
+  },
+  "xodus": {
+    "repo": "https://github.com/xodus-gaming/xodus",
+    "commit": "3e75c9f2d3aad2ea2fdc488d92d0163eb68c1a60",
+    "note": "Client base Ferestre's xodus-cli patch series is written against."
+  },
+  "toolchain": {
+    "runner": "macos-15-intel",
+    "mingw": "mingw-w64 (gcc) via Homebrew, as Highball builds it",
+    "hostArch": "x86_64"
+  }
+}

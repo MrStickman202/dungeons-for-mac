@@ -1,0 +1,39 @@
+# Mirrors the pinned CrossOver Wine source into this repo's releases, so the patch work
+# can use the exact tree the Mac engine is built from. Runs when the pin changes.
+name: mirror-sources
+on:
+  push:
+    paths:
+      - engine/inputs.json
+      - .github/workflows/sources.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: download and verify
+        run: |
+          set -euo pipefail
+          url=$(python3 -c 'import json;print(json.load(open("engine/inputs.json"))["wine"]["url"])')
+          sha=$(python3 -c 'import json;print(json.load(open("engine/inputs.json"))["wine"]["sha256"])')
+          curl -sSfL -o crossover-sources.tar.gz "$url"
+          echo "$sha  crossover-sources.tar.gz" | sha256sum -c -
+          mkdir -p src && tar -xzf crossover-sources.tar.gz -C src
+          ver=$(python3 -c 'import json,re;u=json.load(open("engine/inputs.json"))["wine"]["url"];print(re.search(r"sources-([0-9.]+)\.tar",u).group(1))')
+          echo "VER=$ver" >> "$GITHUB_ENV"
+          tar -C src/sources -cJf "wine-crossover-$ver.tar.xz" wine
+          sha256sum "wine-crossover-$ver.tar.xz" | tee "wine-crossover-$ver.tar.xz.sha256"
+          ls -la wine-crossover-*.tar.xz
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="src-crossover-$VER"
+          gh release view "$tag" >/dev/null 2>&1 && gh release delete "$tag" --yes --cleanup-tag || true
+          gh release create "$tag" "wine-crossover-$VER.tar.xz" "wine-crossover-$VER.tar.xz.sha256" \
+            --title "CrossOver $VER Wine source (LGPL)" --prerelease \
+            --notes "The sources/wine tree of $(python3 -c 'import json;print(json.load(open("engine/inputs.json"))["wine"]["url"])'), repacked. Unmodified CodeWeavers source under LGPL-2.1-or-later."

@@ -1,0 +1,203 @@
+From fd4d22c09baf004c02e9cac37226948976b546f0 Mon Sep 17 00:00:00 2001
+From: Olivia Ryan <olivia.r.dev@gmail.com>
+Date: Thu, 26 Mar 2026 11:22:03 +0100
+Subject: [PATCH 13/20] windows.web: Support json array parsing.
+
+---
+ dlls/windows.web/json_array.c | 32 ++++++++++++++++++++++++-
+ dlls/windows.web/json_value.c | 45 +++++++++++++++++++++++++++++++----
+ dlls/windows.web/private.h    |  2 ++
+ dlls/windows.web/tests/web.c  |  5 ++--
+ 4 files changed, 76 insertions(+), 8 deletions(-)
+
+diff --git a/dlls/windows.web/json_array.c b/dlls/windows.web/json_array.c
+index 332ca7a..bed724f 100644
+--- a/dlls/windows.web/json_array.c
++++ b/dlls/windows.web/json_array.c
+@@ -26,6 +26,9 @@ struct json_array
+ {
+     IJsonArray IJsonArray_iface;
+     LONG ref;
++    IJsonValue **elements;
++    ULONG capacity;
++    ULONG length;
+ };
+ 
+ static inline struct json_array *impl_from_IJsonArray( IJsonArray *iface )
+@@ -33,6 +36,26 @@ static inline struct json_array *impl_from_IJsonArray( IJsonArray *iface )
+     return CONTAINING_RECORD( iface, struct json_array, IJsonArray_iface );
+ }
+ 
++HRESULT json_array_push( IJsonArray *iface, IJsonValue *value )
++{
++    struct json_array *impl = impl_from_IJsonArray( iface );
++
++    TRACE( "iface %p, value %p.\n", iface, value );
++
++    if (impl->length == impl->capacity)
++    {
++        UINT32 capacity = max( 32, impl->capacity * 3 / 2 );
++        IJsonValue **new = impl->elements;
++        if (!(new = realloc( new, capacity * sizeof(*new) ))) return E_OUTOFMEMORY;
++        impl->elements = new;
++        impl->capacity = capacity;
++    }
++
++    impl->elements[impl->length++] = value;
++    IJsonValue_AddRef( value );
++    return S_OK;
++}
++
+ static HRESULT WINAPI json_array_QueryInterface( IJsonArray *iface, REFIID iid, void **out )
+ {
+     struct json_array *impl = impl_from_IJsonArray( iface );
+@@ -69,7 +92,14 @@ static ULONG WINAPI json_array_Release( IJsonArray *iface )
+ 
+     TRACE( "iface %p, ref %lu.\n", iface, ref );
+ 
+-    if (!ref) free( impl );
++    if (!ref)
++    {
++        for (UINT32 i = 0; i < impl->length; i++)
++            IJsonValue_Release( impl->elements[i] );
++
++        free( impl->elements );
++        free( impl );
++    }
+     return ref;
+ }
+ 
+diff --git a/dlls/windows.web/json_value.c b/dlls/windows.web/json_value.c
+index f9b0f33..a21f17e 100644
+--- a/dlls/windows.web/json_value.c
++++ b/dlls/windows.web/json_value.c
+@@ -127,6 +127,7 @@ struct json_value
+         boolean boolean_value;
+         HSTRING string_value;
+         double number_value;
++        IJsonArray *array_value;
+     };
+ };
+ 
+@@ -175,6 +176,8 @@ static ULONG WINAPI json_value_Release( IJsonValue *iface )
+     {
+         if (impl->json_value_type == JsonValueType_String)
+             WindowsDeleteString( impl->string_value );
++        else if (impl->json_value_type == JsonValueType_Array)
++            IJsonArray_Release( impl->array_value );
+ 
+         free( impl );
+     }
+@@ -259,12 +262,14 @@ static HRESULT WINAPI json_value_GetArray( IJsonValue *iface, IJsonArray **value
+ {
+     struct json_value *impl = impl_from_IJsonValue( iface );
+ 
+-    FIXME( "iface %p, value %p stub!\n", iface, value );
++    TRACE( "iface %p, value %p\n", iface, value );
+ 
+     if (!value) return E_POINTER;
+     if (impl->json_value_type != JsonValueType_Array) return E_ILLEGAL_METHOD_CALL;
+ 
+-    return E_NOTIMPL;
++    IJsonArray_AddRef( impl->array_value );
++    *value = impl->array_value;
++    return S_OK;
+ }
+ 
+ static HRESULT WINAPI json_value_GetObject( IJsonValue *iface, IJsonObject **value )
+@@ -386,6 +391,34 @@ static HRESULT parse_json_string( struct json_buffer *json, HSTRING *output )
+     return hr;
+ }
+ 
++static HRESULT parse_json_value( struct json_buffer *json, IJsonValue **value );
++
++static HRESULT parse_json_array( struct json_buffer *json, IJsonArray **value )
++{
++    IJsonArray *array;
++    IJsonValue *child;
++    HRESULT hr;
++
++    if (FAILED(hr = IActivationFactory_ActivateInstance( json_array_factory, (IInspectable **)&array ))) return hr;
++
++    while (json->len && *json->str != ']')
++    {
++        if (FAILED(hr = parse_json_value( json, &child ))) break;
++        hr = json_array_push( array, child );
++        IJsonValue_Release( child );
++        if (FAILED(hr) || !json_buffer_take( json, L",", TRUE )) break;
++        if (json_buffer_take( json, L"]", TRUE ))
++        {
++            hr = WEB_E_INVALID_JSON_STRING;
++            break;
++        }
++    }
++
++    if (FAILED(hr)) IJsonArray_Release( array );
++    else *value = array;
++    return hr;
++}
++
+ static HRESULT parse_json_value( struct json_buffer *json, IJsonValue **value )
+ {
+     struct json_value *impl;
+@@ -421,9 +454,11 @@ static HRESULT parse_json_value( struct json_buffer *json, IJsonValue **value )
+     }
+     else if (json_buffer_take( json, L"[", TRUE ))
+     {
+-        FIXME( "Array parsing not implemented!\n" );
+-        impl->json_value_type = JsonValueType_Array;
+-        if (!json_buffer_take( json, L"]", TRUE )) hr = WEB_E_INVALID_JSON_STRING;
++        if (SUCCEEDED(hr = parse_json_array( json, &impl->array_value )))
++        {
++            impl->json_value_type = JsonValueType_Array;
++            if (!json_buffer_take( json, L"]", TRUE )) hr = WEB_E_INVALID_JSON_STRING;
++        }
+     }
+     else if (json_buffer_take( json, L"{", TRUE ))
+     {
+diff --git a/dlls/windows.web/private.h b/dlls/windows.web/private.h
+index 9dda1e0..b8cc30c 100644
+--- a/dlls/windows.web/private.h
++++ b/dlls/windows.web/private.h
+@@ -40,6 +40,8 @@ extern IActivationFactory *json_array_factory;
+ extern IActivationFactory *json_object_factory;
+ extern IActivationFactory *json_value_factory;
+ 
++HRESULT json_array_push( IJsonArray *iface, IJsonValue *value );
++
+ #define DEFINE_IINSPECTABLE_( pfx, iface_type, impl_type, impl_from, iface_mem, expr )             \
+     static inline impl_type *impl_from( iface_type *iface )                                        \
+     {                                                                                              \
+diff --git a/dlls/windows.web/tests/web.c b/dlls/windows.web/tests/web.c
+index 84a1f3e..8be4eb5 100644
+--- a/dlls/windows.web/tests/web.c
++++ b/dlls/windows.web/tests/web.c
+@@ -163,7 +163,7 @@ static void check_json_( unsigned int line, IJsonValueStatics *json_value_static
+         return;
+     }
+ 
+-    todo_wine_if(expected_json_value_type == JsonValueType_Array || expected_json_value_type == JsonValueType_Object)
++    todo_wine_if(expected_json_value_type == JsonValueType_Object)
+     ok_(__FILE__, line)( hr == S_OK, "got hr %#lx.\n", hr );
+     if (FAILED(hr)) return;
+     hr = IJsonValue_get_ValueType( json_value, &json_value_type );
+@@ -234,7 +234,6 @@ static void check_json_( unsigned int line, IJsonValueStatics *json_value_static
+             break;
+         case JsonValueType_Array:
+             hr = IJsonValue_GetArray( json_value, &json_array );
+-            todo_wine
+             ok_(__FILE__, line)( hr == S_OK, "got hr %#lx.\n", hr );
+             if (hr == S_OK) IJsonArray_Release( json_array );
+             break;
+@@ -460,6 +459,8 @@ static void test_JsonValueStatics(void)
+     check_json( json_value_statics, json, JsonValueType_String, FALSE );
+     json = L"[\"Wine\" \"Linux\"]";
+     check_json( json_value_statics, json, JsonValueType_Array, FALSE );
++    json = L"[\"Wine\", \"Linux\",]";
++    check_json( json_value_statics, json, JsonValueType_Array, FALSE );
+     json = L"{"
+             "    \"Wine\": \"The Wine Project\","
+             "    \"Linux\": [\"Arch\", \"BTW\"]"
+-- 
+2.43.0
+

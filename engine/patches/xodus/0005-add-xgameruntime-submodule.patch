@@ -1,0 +1,44 @@
+From 51e0d4d4ee6142ecb120129ecaacd5adf06ef496 Mon Sep 17 00:00:00 2001
+From: Olivia Ryan <olivia.r.dev@gmail.com>
+Date: Wed, 5 Aug 2026 04:02:59 +0100
+Subject: [PATCH 05/20] add xgameruntime submodule
+
+---
+ .gitmodules       | 3 +++
+ configure.ac      | 1 +
+ dlls/xgameruntime | 1 +
+ 3 files changed, 5 insertions(+)
+ create mode 100644 .gitmodules
+ create mode 160000 dlls/xgameruntime
+
+diff --git a/.gitmodules b/.gitmodules
+new file mode 100644
+index 0000000..aeb1ae4
+--- /dev/null
++++ b/.gitmodules
+@@ -0,0 +1,3 @@
++[submodule "dlls/xgameruntime"]
++	path = dlls/xgameruntime
++	url = https://github.com/xodus-gaming/xgameruntime
+diff --git a/configure.ac b/configure.ac
+index 7434ef9..70ae98d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -3559,6 +3559,7 @@ WINE_CONFIG_MAKEFILE(dlls/xaudio2_7/tests)
+ WINE_CONFIG_MAKEFILE(dlls/xaudio2_8)
+ WINE_CONFIG_MAKEFILE(dlls/xaudio2_8/tests)
+ WINE_CONFIG_MAKEFILE(dlls/xaudio2_9)
++WINE_CONFIG_MAKEFILE(dlls/xgameruntime)
+ WINE_CONFIG_MAKEFILE(dlls/xinput1_1)
+ WINE_CONFIG_MAKEFILE(dlls/xinput1_2)
+ WINE_CONFIG_MAKEFILE(dlls/xinput1_3)
+diff --git a/dlls/xgameruntime b/dlls/xgameruntime
+new file mode 160000
+index 0000000..d15b0de
+--- /dev/null
++++ b/dlls/xgameruntime
+@@ -0,0 +1 @@
++Subproject commit d15b0deae3d13f2503a94d61379e852078afe835
+-- 
+2.43.0
+

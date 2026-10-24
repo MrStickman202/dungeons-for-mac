@@ -1,0 +1,25 @@
+From f82467011db1eac5216230f80a6ed52b16e2936d Mon Sep 17 00:00:00 2001
+From: Christopher Homberger <christopher.homberger@web.de>
+Date: Tue, 4 Aug 2026 17:30:38 +0200
+Subject: [PATCH 03/20] fix: remove unused hr variable
+
+---
+ dlls/windows.devices.enumeration/information.c | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/dlls/windows.devices.enumeration/information.c b/dlls/windows.devices.enumeration/information.c
+index 5b41c44..46db8b6 100644
+--- a/dlls/windows.devices.enumeration/information.c
++++ b/dlls/windows.devices.enumeration/information.c
+@@ -356,8 +356,6 @@ HRESULT device_information_create( const DEV_OBJECT *obj, IDeviceInformation **i
+ 
+ HRESULT async( IUnknown *invoker, IUnknown *param, PROPVARIANT *result, BOOL called_async )
+ {
+-    HRESULT hr;
+-
+     TRACE( "invoker %p, param %p, result %p\n", invoker, param, result );
+ 
+     result->vt = VT_UNKNOWN;
+-- 
+2.43.0
+
