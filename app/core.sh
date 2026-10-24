@@ -479,13 +479,16 @@ job_setup() {
 
 job_repair() {
   [ -f "$READY_MARK" ] || { fail "Run setup first."; return 1; }
+  progress -1 "Checking for engine and sign-in client updates..."
+  install_store_engine || return 1
+  install_client || return 1
   progress -1 "Stopping Windows programs..."
   stop_server
   rm -f "$PREFIX_MARK"
   make_prefix || return 1
   install_vcredist force || return 1
   progress 100 "Done"
-  okmsg "The Windows layer was repaired. Your game and saves were not touched."
+  okmsg "Updated and repaired. Your game and saves were not touched."
   return 0
 }
 
@@ -670,6 +673,7 @@ install_client() {
   tmp=$(mktemp -d "$AS/unpack.XXXXXX") || return 1
   tar -xzf "$DL/dfm-client.tar.gz" -C "$tmp" >> "$LOGS/setup.log" 2>&1 && [ -x "$tmp/client/xodus-cli" ] \
     || { rm -rf "$tmp"; fail "The sign-in client download looks incomplete."; return 1; }
+  pkill -f "$XSVC" 2>/dev/null; sleep 1
   rm -rf "$CLIENT_DIR"; mv "$tmp/client" "$CLIENT_DIR"; rm -rf "$tmp" "$DL/dfm-client.tar.gz" "$DL/dfm-client.tar.gz.expected"
   if is_mac; then /usr/bin/xattr -dr com.apple.quarantine "$CLIENT_DIR" 2>/dev/null; fi
   printf '%s\n' "$want" > "$CLIENT_DIR/.sha"

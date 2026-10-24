@@ -431,7 +431,7 @@ end settingsMenu
 -- More
 -- ---------------------------------------------------------------------------
 on moreMenu()
-	set opts to {"Sign in again...", "Re-download / update the game...", "Add a Launcher-version game folder instead...", "How to copy the game from your PC", "Open the saves folder", "Back up saves to Documents", "Force-quit the game", "Repair the Windows layer...", "Minecraft Launcher (experimental)...", "Show log", "Create a diagnostic report", "About Dungeons for Mac", "Uninstall...", "Quit"}
+	set opts to {"Sign in again...", "Re-download / update the game...", "Add a Launcher-version game folder instead...", "How to copy the game from your PC", "Open the saves folder", "Back up saves to Documents", "Force-quit the game", "Update and repair...", "Minecraft Launcher (experimental)...", "Show log", "Create a diagnostic report", "About Dungeons for Mac", "Uninstall...", "Quit"}
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt "More options:" OK button name "Select" cancel button name "Back"
 	if pick is false then return "back"
 	set pick to item 1 of pick
@@ -458,10 +458,10 @@ on moreMenu()
 	else if pick starts with "Force-quit" then
 		my core("stop")
 		my dlg("Every Windows program in Dungeons for Mac was stopped.", {"OK"}, "OK")
-	else if pick starts with "Repair" then
-		set b to my dlg("Rebuilds Windows settings and reinstalls the Visual C++ runtimes. Your game files and saves stay where they are.", {"Back", "Repair"}, "Repair")
+	else if pick starts with "Update and repair" then
+		set b to my dlg("Downloads the newest engine and sign-in client, then rebuilds Windows settings and reinstalls the Visual C++ runtimes. Your game files and saves stay where they are.", {"Back", "Repair"}, "Repair")
 		if b is "Repair" then
-			set res to my runJob("repair", "Repairing the Windows layer")
+			set res to my runJob("repair", "Updating and repairing")
 			my reportResult(res, "Repaired.")
 		end if
 	else if pick starts with "Minecraft Launcher" then
