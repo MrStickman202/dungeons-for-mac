@@ -1,0 +1,63 @@
+# Opens the real app window on a GitHub Mac with sample data and takes screenshots.
+# The pictures are pushed to the "screenshots" branch.
+name: screenshots
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/screenshots.yml
+permissions:
+  contents: write
+jobs:
+  shots:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: stub engine + build the window
+        run: |
+          set -euo pipefail
+          D="$HOME/Library/Application Support/DungeonsForMac/app"
+          mkdir -p "$D"
+          cat > "$D/core.sh" <<'EOF'
+          #!/bin/bash
+          case "$1" in
+            status) printf 'engine=1\ngame=1\nrunning=0\nbusy=0\nlauncher=0\nsigned_in=1\nmode=store\nrenderer=dxmt\nfps=60\nsharp=0\nhud=0\nmetalfx=0\nd3dmetal_license=0\nsync=msync\nlaunch=direct\nargs=\n' ;;
+            games)  printf 'dungeons|Minecraft Dungeons|ready\nbedrock|Minecraft Bedrock (experimental)|notdownloaded\n' ;;
+            *)      echo "ok|" ;;
+          esac
+          EOF
+          chmod 755 "$D/core.sh"
+          osacompile -o "$D/Dungeons for Mac.app" app/ui.applescript
+          cp app/AppIcon.icns "$D/Dungeons for Mac.app/Contents/Resources/applet.icns"
+          plutil -replace CFBundleName -string "Dungeons for Mac" "$D/Dungeons for Mac.app/Contents/Info.plist"
+          codesign --force --deep --sign - "$D/Dungeons for Mac.app"
+          echo "APP=$D/Dungeons for Mac.app" >> "$GITHUB_ENV"
+      - name: take screenshots
+        run: |
+          set -uo pipefail
+          mkdir -p shots
+          shot() { sleep 3; screencapture -x "shots/$1.png" && echo "took $1"; }
+          click() { osascript -e "tell application \"System Events\" to tell (first application process whose frontmost is true) to click button \"$1\" of window 1" || echo "click $1 failed"; }
+          key() { osascript -e "tell application \"System Events\" to key code $1" || echo "key $1 failed"; }
+          open "$APP"
+          shot 1-games
+          key 36            # Return = Open (Minecraft Dungeons)
+          shot 2-dungeons
+          click Back
+          sleep 2
+          key 125; key 36   # Down, Return = Minecraft Bedrock
+          shot 3-bedrock
+          click Back
+          sleep 2
+          key 125; key 125; key 125; key 36   # Settings...
+          shot 4-settings
+          ls -la shots
+      - name: push to the screenshots branch
+        run: |
+          set -euo pipefail
+          cd shots
+          git init -q -b screenshots
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          git add . && git commit -qm "screenshots ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" screenshots
