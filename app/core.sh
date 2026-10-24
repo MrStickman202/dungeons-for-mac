@@ -329,7 +329,9 @@ download() { # url dest sha256 size label from% to%
 # Setup: engine, Windows environment, runtimes
 # ---------------------------------------------------------------------------
 install_engine() {
-  download "$WINE_URL" "$DL/wine-engine.tar.gz" "$WINE_SHA" "$WINE_SIZE" "Downloading Wine 11 engine" 2 58 || return 1
+  # Wine itself: the Dungeons for Mac build (CrossOver 26.3 + Xbox runtime). Highball's
+  # plain build ($WINE_URL) is the same tree without the Xbox patches.
+  fetch_build dfm-engine.tar.gz "$DL/wine-engine.tar.gz" "Downloading the Wine 11 engine" 2 58 || return 1
   download "$RT_URL" "$DL/runtime.tar.xz" "$RT_SHA" "$RT_SIZE" "Downloading runtime libraries" 58 72 || return 1
   download "$DXMT_URL" "$DL/dxmt.tar.gz" "$DXMT_SHA" "$DXMT_SIZE" "Downloading DXMT (Direct3D to Metal)" 72 76 || return 1
   download "$MVK_URL" "$DL/moltenvk.tar.gz" "$MVK_SHA" "$MVK_SIZE" "Downloading MoltenVK" 76 77 || return 1
@@ -342,6 +344,7 @@ install_engine() {
   if ! tar -xzf "$DL/wine-engine.tar.gz" -C "$tmp" >> "$LOGS/setup.log" 2>&1 || [ ! -f "$tmp/engine/bin/wine" ]; then
     rm -rf "$tmp"; fail "Couldn't unpack the Wine engine. Is the disk full?"; return 1
   fi
+  cp "$DL/wine-engine.tar.gz.expected" "$tmp/.dfm-store-engine" 2>/dev/null
 
   progress -1 "Unpacking runtime libraries..."
   mkdir -p "$tmp/rt"
@@ -380,7 +383,7 @@ install_engine() {
     rm -rf "$tmp"; fail "Couldn't put the engine in place."; return 1
   fi
   rm -rf "$ENG.old"
-  rm -f "$DL/wine-engine.tar.gz" "$DL/runtime.tar.xz" "$DL/dxmt.tar.gz" "$DL/moltenvk.tar.gz" "$DL/audiobuf.tar.xz"
+  rm -f "$DL/wine-engine.tar.gz" "$DL/wine-engine.tar.gz.expected" "$DL/runtime.tar.xz" "$DL/dxmt.tar.gz" "$DL/moltenvk.tar.gz" "$DL/audiobuf.tar.xz"
   log "engine $ENGINE_ID installed"
   return 0
 }
