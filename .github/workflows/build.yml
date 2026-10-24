@@ -34,10 +34,15 @@ jobs:
           set -euo pipefail
           exec > >(tee -a "$RUNNER_TEMP/ci.log") 2>&1
           cd src/wine
+          # its own repository: inside the workflow checkout, git apply would treat the
+          # patch paths as relative to the checkout and silently skip all of them
+          git init -q .
           for p in ../../engine/series/wine/*.patch; do
             git apply --whitespace=nowarn -p1 "$p" || { echo "::error::$(basename "$p") does not apply"; exit 1; }
           done
           echo "applied $(ls ../../engine/series/wine/*.patch | wc -l) patches"
+          grep -q 'dlls/xgameruntime' configure.ac
+          test -f dlls/xgameruntime/xgameruntime.spec
       - name: toolchain
         run: |
           set -euo pipefail
@@ -140,6 +145,8 @@ jobs:
           for p in ../engine/series/xodus/*.patch; do
             git apply --whitespace=nowarn "$p" || { echo "::error::$(basename "$p") does not apply"; exit 1; }
           done
+      - name: tools
+        run: brew install -q protobuf
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/cache@v4
         with:

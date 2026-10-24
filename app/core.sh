@@ -673,24 +673,26 @@ install_client() {
 }
 
 client_env() { # isolated runtime/state folders for the client and its service
-  export XODUS_RUNTIME_DIR="$AS/run"
+  # Short on purpose: a Unix socket path is limited to 104 bytes on macOS
+  export XODUS_RUNTIME_DIR="/tmp/dfm-$(id -u)"
   export XDG_STATE_HOME="$AS/state/xodus" XDG_DATA_HOME="$AS/state/xodus-data" XDG_CACHE_HOME="$AS/state/xodus-cache"
   mkdir -p "$XODUS_RUNTIME_DIR" "$XDG_STATE_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
   chmod 700 "$XODUS_RUNTIME_DIR" 2>/dev/null
 }
 
 service_up() {
-  [ -S "$AS/run/xodus.sock" ] && pgrep -f "$XSVC" >/dev/null 2>&1
+  [ -S "/tmp/dfm-$(id -u)/xodus.sock" ] && pgrep -f "$XSVC" >/dev/null 2>&1
 }
 
 start_service() {
   client_env
   service_up && return 0
-  rm -f "$AS/run/xodus.sock"
+  [ -O "$XODUS_RUNTIME_DIR" ] || { echo "$XODUS_RUNTIME_DIR is not ours" >> "$LOGS/xodus-service.log"; return 1; }
+  rm -f "$XODUS_RUNTIME_DIR/xodus.sock"
   ( trap '' HUP; exec "$XSVC" ) >> "$LOGS/xodus-service.log" 2>&1 < /dev/null &
   local i=0
-  while [ $i -lt 20 ] && [ ! -S "$AS/run/xodus.sock" ]; do sleep 0.5; i=$((i + 1)); done
-  [ -S "$AS/run/xodus.sock" ]
+  while [ $i -lt 20 ] && [ ! -S "$XODUS_RUNTIME_DIR/xodus.sock" ]; do sleep 0.5; i=$((i + 1)); done
+  [ -S "$XODUS_RUNTIME_DIR/xodus.sock" ]
 }
 
 store_config() { find "$STORE_DIR" -maxdepth 1 -type f -iname 'microsoftgame.config' 2>/dev/null | head -n 1; }
