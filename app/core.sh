@@ -768,11 +768,34 @@ job_storeinstall() {
   okmsg "Minecraft Dungeons is downloaded. Press Play!"
 }
 
+# PlayStation and Switch pads: Wine prefers handing Sony controllers to games as
+# raw HID devices (for games with native DualShock/DualSense support) and drops
+# the SDL-mapped XInput version. Dungeons only understands XInput/GameInput pads,
+# so turn that preference off per vendor: 054c Sony, 057e Nintendo.
+PADS_MARK="$PREFIX/.dfm-pads-1"
+apply_controller_settings() {
+  [ -f "$PADS_MARK" ] && return 0
+  local reg="$PREFIX/drive_c/dfm-pads.reg" rc
+  {
+    printf 'REGEDIT4\r\n\r\n'
+    printf '[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus\\Devices\\054c]\r\n"Hidraw"=dword:00000000\r\n\r\n'
+    printf '[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus\\Devices\\057e]\r\n"Hidraw"=dword:00000000\r\n\r\n'
+    printf '[HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\WineBus]\r\n"Map Controllers"=dword:00000001\r\n"Enable SDL"=dword:00000001\r\n'
+  } > "$reg"
+  ( wine_env setup; "$WINE" reg import 'C:\dfm-pads.reg' ) >> "$LOGS/setup.log" 2>&1
+  rc=$?
+  rm -f "$reg"
+  wait_server 30 || stop_server
+  [ $rc -eq 0 ] && touch "$PADS_MARK"
+  log "controller settings applied (rc $rc)"
+}
+
 play_store() {
   local exe glog
   exe=$(conf_get store_exe "")
   start_service || { echo "error|The Xbox sign-in service didn't start. Choose More > Show Log."; return 0; }
   stop_server
+  apply_controller_settings
   rotate_logs
   glog="$LOGS/game-$(date +%Y%m%d-%H%M%S).log"
   printf 'Dungeons for Mac %s - Store copy, exe=%s\nrenderer=%s fps=%s sharp=%s sync=%s\n----\n' \
@@ -798,6 +821,8 @@ cmd_wine_shim() { # called by xodus-cli as its "wine": inherited fds stay open a
   wine_env game
   client_env
   export WINE_GAMEINPUT=1
+  # Controller diagnostics: SDL loading, device arrival, XInput and GameInput warnings
+  export WINEDEBUG="${DFM_WINEDEBUG:-fixme-all,warn+hid,warn+ginput,warn+xinput}"
   exec "$WINE" "$@"
 }
 
@@ -976,6 +1001,8 @@ cmd_diag() {
     echo; echo "== settings"; cat "$CONF" 2>/dev/null
     echo; echo "== engine"; ls -la "$ENG" "$ENG/renderers/dxmt/wine/x86_64-windows" 2>/dev/null
     echo; echo "== game folder"; ls -la "$(conf_get game_root "")" 2>/dev/null
+    echo; echo "== controllers macOS sees"
+    if is_mac; then ioreg -r -c IOHIDDevice -l 2>/dev/null | grep -E '"Product"|"PrimaryUsagePage"|"Transport"' | sed -n '1,60p'; fi
     if [ -x "$XCLI" ] && [ -d "$STORE_DIR" ]; then
       echo; echo "== store package identity"
       c=$(store_config); [ -n "$c" ] && tr -d '\r' < "$c" | grep -oiE '(TitleId|MSAAppId|StoreId|Identity Name|Executable Name)="?[^" >]*' | sort -u
