@@ -1,0 +1,465 @@
+wine.tar.xz: OK
+applied       79 patches
+[32m==>[0m [1mDownloading bottle manifests[0m
+✔︎ Bottle Manifest mingw-w64 (14.0.0_3)
+✔︎ Bottle Manifest bison (3.8.2)
+✔︎ Bottle Manifest flex (2.6.4_2)
+✔︎ Bottle Manifest automake (1.18.1_1)
+✔︎ Bottle Manifest ccache (4.14)
+✔︎ Bottle Manifest sdl2-compat (2.32.70)
+✔︎ Bottle Manifest gstreamer (1.28.6_1)
+✔︎ Bottle Manifest molten-vk (1.4.2)
+[34m==>[0m [1mWould install 8 formulae:[0m
+mingw-w64 bison flex automake ccache sdl2-compat gstreamer molten-vk
+[34m==>[0m [1mWould install 4 dependencies for ccache:[0m
+blake3
+fmt
+hiredis
+xxhash
+[34m==>[0m [1mWould install 1 dependency for sdl2-compat:[0m
+sdl3
+[34m==>[0m [1mWould install 62 dependencies for gstreamer:[0m
+faac
+faad2
+fdk-aac
+mpg123
+lame
+libvpx
+opus
+sdl3
+sdl2-compat
+svt-av1
+x264
+x265
+ffmpeg
+libogg
+flac
+gdk-pixbuf
+graphene
+dbus
+libxfixes
+libxi
+libxtst
+at-spi2-core
+fribidi
+gsettings-desktop-schemas
+hicolor-icon-theme
+libepoxy
+libdatrie
+libthai
+pango
+gtk+3
+librsvg
+gtk4
+imath
+json-glib
+libunibreak
+libass
+libnice
+libvorbis
+speex
+theora
+libshout
+libsndfile
+glib-networking
+libsoup
+libusrsctp
+opencore-amr
+libdeflate
+openjph
+openexr
+openjpeg
+orc
+gobject-introspection
+py3cairo
+pygobject3
+rtmpdump
+srt
+srtp
+utf8cpp
+taglib
+libcuefile
+libreplaygain
+musepack
+[34m==>[0m [1mWould upgrade 1 dependency for gstreamer:[0m
+little-cms2
+[32m==>[0m [1mFetching downloads for: [32mmingw-w64[39m, [32mbison[39m, [32mflex[39m, [32mautomake[39m, [32mccache[39m, [32msdl2-compat[39m, [32mgstreamer[39m and [32mmolten-vk[39m[0m
+✔︎ Bottle bison (3.8.2)
+✔︎ Bottle flex (2.6.4_2)
+✔︎ Bottle automake (1.18.1_1)
+✔︎ Bottle ccache (4.14)
+✔︎ Bottle sdl2-compat (2.32.70)
+✔︎ Bottle gstreamer (1.28.6_1)
+✔︎ Bottle molten-vk (1.4.2)
+✔︎ Bottle Manifest blake3 (1.8.7)
+✔︎ Bottle blake3 (1.8.7)
+✔︎ Bottle Manifest fmt (12.2.0)
+✔︎ Bottle fmt (12.2.0)
+✔︎ Bottle Manifest hiredis (1.4.1)
+✔︎ Bottle hiredis (1.4.1)
+✔︎ Bottle Manifest xxhash (0.8.3)
+✔︎ Bottle xxhash (0.8.3)
+✔︎ Bottle Manifest sdl3 (3.4.14)
+✔︎ Bottle sdl3 (3.4.14)
+✔︎ Bottle Manifest faac (2.1)
+✔︎ Bottle faac (2.1)
+✔︎ Bottle Manifest faad2 (2.11.3)
+✔︎ Bottle faad2 (2.11.3)
+✔︎ Bottle Manifest fdk-aac (2.0.3)
+✔︎ Bottle fdk-aac (2.0.3)
+✔︎ Bottle Manifest mpg123 (1.33.7)
+✔︎ Bottle mpg123 (1.33.7)
+✔︎ Bottle Manifest lame (4.0)
+✔︎ Bottle lame (4.0)
+✔︎ Bottle Manifest libvpx (1.16.0)
+✔︎ Bottle libvpx (1.16.0)
+✔︎ Bottle Manifest opus (1.6.1)
+✔︎ Bottle opus (1.6.1)
+✔︎ Bottle Manifest svt-av1 (4.2.0)
+✔︎ Bottle svt-av1 (4.2.0)
+✔︎ Bottle Manifest x264 (r3222)
+✔︎ Bottle x264 (r3222)
+✔︎ Bottle Manifest x265 (4.2)
+✔︎ Bottle x265 (4.2)
+✔︎ Bottle Manifest ffmpeg (9.0.1)
+✔︎ Bottle ffmpeg (9.0.1)
+✔︎ Bottle Manifest libogg (1.3.6)
+✔︎ Bottle libogg (1.3.6)
+✔︎ Bottle Manifest flac (1.5.0)
+✔︎ Bottle flac (1.5.0)
+✔︎ Bottle Manifest gdk-pixbuf (2.44.8)
+✔︎ Bottle gdk-pixbuf (2.44.8)
+✔︎ Bottle Manifest graphene (1.10.8)
+✔︎ Bottle graphene (1.10.8)
+✔︎ Bottle Manifest dbus (1.16.2_1)
+✔︎ Bottle dbus (1.16.2_1)
+✔︎ Bottle Manifest libxfixes (6.0.2)
+✔︎ Bottle libxfixes (6.0.2)
+✔︎ Bottle Manifest libxi (1.8.3)
+✔︎ Bottle libxi (1.8.3)
+✔︎ Bottle Manifest libxtst (1.2.5)
+✔︎ Bottle libxtst (1.2.5)
+✔︎ Bottle Manifest at-spi2-core (2.60.6)
+✔︎ Bottle at-spi2-core (2.60.6)
+✔︎ Bottle Manifest fribidi (1.0.16)
+✔︎ Bottle fribidi (1.0.16)
+✔︎ Bottle Manifest gsettings-desktop-schemas (50.1)
+✔︎ Bottle gsettings-desktop-schemas (50.1)
+✔︎ Bottle Manifest hicolor-icon-theme (0.18)
+✔︎ Bottle hicolor-icon-theme (0.18)
+✔︎ Bottle Manifest libepoxy (1.5.10)
+✔︎ Bottle libepoxy (1.5.10)
+✔︎ Bottle Manifest libdatrie (0.2.14)
+✔︎ Bottle libdatrie (0.2.14)
+✔︎ Bottle Manifest libthai (0.1.30)
+✔︎ Bottle libthai (0.1.30)
+✔︎ Bottle Manifest pango (1.58.2)
+✔︎ Bottle pango (1.58.2)
+✔︎ Bottle Manifest gtk+3 (3.24.52)
+✔︎ Bottle gtk+3 (3.24.52)
+✔︎ Bottle Manifest librsvg (2.62.3)
+✔︎ Bottle librsvg (2.62.3)
+✔︎ Bottle Manifest gtk4 (4.22.4)
+✔︎ Bottle gtk4 (4.22.4)
+✔︎ Bottle Manifest imath (3.2.3)
+✔︎ Bottle imath (3.2.3)
+✔︎ Bottle Manifest json-glib (1.10.8)
+✔︎ Bottle json-glib (1.10.8)
+✔︎ Bottle Manifest libunibreak (7.0)
+✔︎ Bottle libunibreak (7.0)
+✔︎ Bottle Manifest libass (0.17.5)
+✔︎ Bottle libass (0.17.5)
+✔︎ Bottle Manifest libnice (0.1.23)
+✔︎ Bottle libnice (0.1.23)
+✔︎ Bottle Manifest libvorbis (1.3.7)
+✔︎ Bottle libvorbis (1.3.7)
+✔︎ Bottle Manifest speex (1.2.1)
+✔︎ Bottle speex (1.2.1)
+✔︎ Bottle Manifest theora (1.2.0)
+✔︎ Bottle theora (1.2.0)
+✔︎ Bottle Manifest libshout (2.4.6_2)
+✔︎ Bottle libshout (2.4.6_2)
+✔︎ Bottle Manifest libsndfile (1.2.2_1)
+✔︎ Bottle libsndfile (1.2.2_1)
+✔︎ Bottle Manifest glib-networking (2.80.1)
+✔︎ Bottle glib-networking (2.80.1)
+✔︎ Bottle Manifest libsoup (3.6.6)
+✔︎ Bottle libsoup (3.6.6)
+✔︎ Bottle Manifest libusrsctp (0.9.5.0_1)
+✔︎ Bottle libusrsctp (0.9.5.0_1)
+✔︎ Bottle Manifest little-cms2 (2.19.1)
+✔︎ Bottle little-cms2 (2.19.1)
+✔︎ Bottle Manifest opencore-amr (0.1.6)
+✔︎ Bottle opencore-amr (0.1.6)
+✔︎ Bottle Manifest libdeflate (1.26)
+✔︎ Bottle libdeflate (1.26)
+✔︎ Bottle Manifest openjph (0.31.0)
+✔︎ Bottle openjph (0.31.0)
+✔︎ Bottle Manifest openexr (3.4.15)
+✔︎ Bottle openexr (3.4.15)
+✔︎ Bottle Manifest openjpeg (2.5.4)
+✔︎ Bottle openjpeg (2.5.4)
+✔︎ Bottle Manifest orc (0.4.42)
+✔︎ Bottle orc (0.4.42)
+✔︎ Bottle Manifest gobject-introspection (1.86.0_3)
+✔︎ Bottle gobject-introspection (1.86.0_3)
+✔︎ Bottle Manifest py3cairo (1.29.1)
+✔︎ Bottle py3cairo (1.29.1)
+✔︎ Bottle Manifest pygobject3 (3.56.3)
+✔︎ Bottle pygobject3 (3.56.3)
+✔︎ Bottle Manifest rtmpdump (2.6)
+✔︎ Bottle Manifest srt (1.5.6)
+✔︎ Bottle Manifest utf8cpp (4.2.0)
+✔︎ Bottle Manifest srtp (2.8.0)
+✔︎ Bottle Manifest taglib (2.3.1)
+✔︎ Bottle Manifest libcuefile (r475)
+✔︎ Bottle srt (1.5.6)
+✔︎ Bottle srtp (2.8.0)
+✔︎ Bottle Manifest libreplaygain (r475)
+✔︎ Bottle rtmpdump (2.6)
+✔︎ Bottle utf8cpp (4.2.0)
+✔︎ Bottle libcuefile (r475)
+✔︎ Bottle libreplaygain (r475)
+✔︎ Bottle Manifest musepack (r475)
+✔︎ Bottle taglib (2.3.1)
+✔︎ Bottle musepack (r475)
+✔︎ Bottle mingw-w64 (14.0.0_3)
+[34m==>[0m [1mPouring mingw-w64--14.0.0_3.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/mingw-w64/14.0.0_3: 8,584 files, 1.4GB
+[34m==>[0m [1mPouring bison--3.8.2.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/bison/3.8.2: 99 files, 3.9MB
+[34m==>[0m [1mPouring flex--2.6.4_2.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/flex/2.6.4_2: 46 files, 1.6MB
+[34m==>[0m [1mPouring automake--1.18.1_1.sequoia.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/automake/1.18.1_1: 134 files, 3.6MB
+[32m==>[0m [1mInstalling dependencies for ccache:[0m [32mblake3[39m, [32mfmt[39m, [32mhiredis[39m and [32mxxhash[39m[0m
+[32m==>[0m [1mInstalling ccache dependency: [32mblake3[39m[0m
+[34m==>[0m [1mPouring blake3--1.8.7.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/blake3/1.8.7: 13 files, 122.5KB
+[32m==>[0m [1mInstalling ccache dependency: [32mfmt[39m[0m
+[34m==>[0m [1mPouring fmt--12.2.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/fmt/12.2.0: 31 files, 1MB
+[32m==>[0m [1mInstalling ccache dependency: [32mhiredis[39m[0m
+[34m==>[0m [1mPouring hiredis--1.4.1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/hiredis/1.4.1: 53 files, 482.8KB
+[32m==>[0m [1mInstalling ccache dependency: [32mxxhash[39m[0m
+[34m==>[0m [1mPouring xxhash--0.8.3.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/xxhash/0.8.3: 28 files, 546.6KB
+[32m==>[0m [1mInstalling [32mccache[39m[0m
+[34m==>[0m [1mPouring ccache--4.14.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/ccache/4.14: 89 files, 2.3MB
+[32m==>[0m [1mInstalling sdl2-compat dependency: [32msdl3[39m[0m
+[34m==>[0m [1mPouring sdl3--3.4.14.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/sdl3/3.4.14: 103 files, 6.4MB
+[32m==>[0m [1mInstalling [32msdl2-compat[39m[0m
+[34m==>[0m [1mPouring sdl2-compat--2.32.70.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/sdl2-compat/2.32.70: 117 files, 3.2MB
+[32m==>[0m [1mInstalling dependencies for gstreamer:[0m [32mfaac[39m, [32mfaad2[39m, [32mfdk-aac[39m, [32mmpg123[39m, [32mlame[39m, [32mlibvpx[39m, [32mopus[39m, [32msvt-av1[39m, [32mx264[39m, [32mx265[39m, [32mffmpeg[39m, [32mlibogg[39m, [32mflac[39m, [32mgdk-pixbuf[39m, [32mgraphene[39m, [32mdbus[39m, [32mlibxfixes[39m, [32mlibxi[39m, [32mlibxtst[39m, [32mat-spi2-core[39m, [32mfribidi[39m, [32mgsettings-desktop-schemas[39m, [32mhicolor-icon-theme[39m, [32mlibepoxy[39m, [32mlibdatrie[39m, [32mlibthai[39m, [32mpango[39m, [32mgtk+3[39m, [32mlibrsvg[39m, [32mgtk4[39m, [32mimath[39m, [32mjson-glib[39m, [32mlibunibreak[39m, [32mlibass[39m, [32mlibnice[39m, [32mlibvorbis[39m, [32mspeex[39m, [32mtheora[39m, [32mlibshout[39m, [32mlibsndfile[39m, [32mglib-networking[39m, [32mlibsoup[39m, [32mlibusrsctp[39m, [32mopencore-amr[39m, [32mlibdeflate[39m, [32mopenjph[39m, [32mopenexr[39m, [32mopenjpeg[39m, [32morc[39m, [32mgobject-introspection[39m, [32mpy3cairo[39m, [32mpygobject3[39m, [32mrtmpdump[39m, [32msrt[39m, [32msrtp[39m, [32mutf8cpp[39m, [32mtaglib[39m, [32mlibcuefile[39m, [32mlibreplaygain[39m and [32mmusepack[39m[0m
+[32m==>[0m [1mInstalling gstreamer dependency: [32mfaac[39m[0m
+[34m==>[0m [1mPouring faac--2.1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/faac/2.1: 16 files, 285.0KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mfaad2[39m[0m
+[34m==>[0m [1mPouring faad2--2.11.3.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/faad2/2.11.3: 18 files, 561.4KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mfdk-aac[39m[0m
+[34m==>[0m [1mPouring fdk-aac--2.0.3.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/fdk-aac/2.0.3: 15 files, 3.4MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mmpg123[39m[0m
+[34m==>[0m [1mPouring mpg123--1.33.7.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/mpg123/1.33.7: 34 files, 1.8MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlame[39m[0m
+[34m==>[0m [1mPouring lame--4.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/lame/4.0: 29 files, 1.9MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibvpx[39m[0m
+[34m==>[0m [1mPouring libvpx--1.16.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libvpx/1.16.0: 22 files, 5.8MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mopus[39m[0m
+[34m==>[0m [1mPouring opus--1.6.1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/opus/1.6.1: 16 files, 1.2MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32msvt-av1[39m[0m
+[34m==>[0m [1mPouring svt-av1--4.2.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/svt-av1/4.2.0: 23 files, 5.7MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mx264[39m[0m
+[34m==>[0m [1mPouring x264--r3222.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/x264/r3222: 12 files, 5.9MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mx265[39m[0m
+[34m==>[0m [1mPouring x265--4.2.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/x265/4.2: 12 files, 38.5MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mffmpeg[39m[0m
+[34m==>[0m [1mPouring ffmpeg--9.0.1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/ffmpeg/9.0.1: 290 files, 57.3MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibogg[39m[0m
+[34m==>[0m [1mPouring libogg--1.3.6.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libogg/1.3.6: 103 files, 509KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mflac[39m[0m
+[34m==>[0m [1mPouring flac--1.5.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/flac/1.5.0: 40 files, 1.9MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mgdk-pixbuf[39m[0m
+[34m==>[0m [1mPouring gdk-pixbuf--2.44.8.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/gdk-pixbuf/2.44.8: 152 files, 3.5MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mgraphene[39m[0m
+[34m==>[0m [1mPouring graphene--1.10.8.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/graphene/1.10.8: 36 files, 1MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mdbus[39m[0m
+[34m==>[0m [1mPouring dbus--1.16.2_1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/dbus/1.16.2_1: 79 files, 1.7MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibxfixes[39m[0m
+[34m==>[0m [1mPouring libxfixes--6.0.2.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libxfixes/6.0.2: 13 files, 103KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibxi[39m[0m
+[34m==>[0m [1mPouring libxi--1.8.3.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libxi/1.8.3: 86 files, 671.1KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibxtst[39m[0m
+[34m==>[0m [1mPouring libxtst--1.2.5.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libxtst/1.2.5: 23 files, 130.6KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mat-spi2-core[39m[0m
+[34m==>[0m [1mPouring at-spi2-core--2.60.6.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/at-spi2-core/2.60.6: 203 files, 4.5MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mfribidi[39m[0m
+[34m==>[0m [1mPouring fribidi--1.0.16.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/fribidi/1.0.16: 68 files, 489.6KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mgsettings-desktop-schemas[39m[0m
+[34m==>[0m [1mPouring gsettings-desktop-schemas--50.1.sonoma.bottle.1.tar.gz[0m
+Warning: Schema “org.gnome.system.locale” has path “/system/locale/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy” has path “/system/proxy/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.http” has path “/system/proxy/http/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.https” has path “/system/proxy/https/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.ftp” has path “/system/proxy/ftp/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.socks” has path “/system/proxy/socks/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+🍺  /usr/local/Cellar/gsettings-desktop-schemas/50.1: 108 files, 6.5MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mhicolor-icon-theme[39m[0m
+[34m==>[0m [1mPouring hicolor-icon-theme--0.18.all.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/hicolor-icon-theme/0.18: 8 files, 81.3KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibepoxy[39m[0m
+[34m==>[0m [1mPouring libepoxy--1.5.10.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libepoxy/1.5.10: 10 files, 2.6MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibdatrie[39m[0m
+[34m==>[0m [1mPouring libdatrie--0.2.14.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libdatrie/0.2.14: 20 files, 231.3KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibthai[39m[0m
+[34m==>[0m [1mPouring libthai--0.1.30.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libthai/0.1.30: 30 files, 923.8KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mpango[39m[0m
+[34m==>[0m [1mPouring pango--1.58.2.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/pango/1.58.2: 69 files, 3.4MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mgtk+3[39m[0m
+[34m==>[0m [1mPouring gtk+3--3.24.52.sonoma.bottle.tar.gz[0m
+Warning: Schema “org.gnome.system.locale” has path “/system/locale/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy” has path “/system/proxy/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.http” has path “/system/proxy/http/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.https” has path “/system/proxy/https/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.ftp” has path “/system/proxy/ftp/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.socks” has path “/system/proxy/socks/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+gtk3-update-icon-cache: Cache file created successfully.
+🍺  /usr/local/Cellar/gtk+3/3.24.52: 749 files, 58.4MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibrsvg[39m[0m
+[34m==>[0m [1mPouring librsvg--2.62.3.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/librsvg/2.62.3: 21 files, 13MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mgtk4[39m[0m
+[34m==>[0m [1mPouring gtk4--4.22.4.sonoma.bottle.1.tar.gz[0m
+Warning: Schema “org.gnome.system.locale” has path “/system/locale/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy” has path “/system/proxy/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.http” has path “/system/proxy/http/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.https” has path “/system/proxy/https/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.ftp” has path “/system/proxy/ftp/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+Warning: Schema “org.gnome.system.proxy.socks” has path “/system/proxy/socks/”.  Paths starting with “/apps/”, “/desktop/” or “/system/” are deprecated.
+🍺  /usr/local/Cellar/gtk4/4.22.4: 643 files, 75.5MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mimath[39m[0m
+[34m==>[0m [1mPouring imath--3.2.3.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/imath/3.2.3: 50 files, 953.8KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mjson-glib[39m[0m
+[34m==>[0m [1mPouring json-glib--1.10.8.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/json-glib/1.10.8: 122 files, 1.4MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibunibreak[39m[0m
+[34m==>[0m [1mPouring libunibreak--7.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libunibreak/7.0: 19 files, 310.1KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibass[39m[0m
+[34m==>[0m [1mPouring libass--0.17.5.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libass/0.17.5: 12 files, 677.6KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibnice[39m[0m
+[34m==>[0m [1mPouring libnice--0.1.23.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libnice/0.1.23: 32 files, 678.4KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibvorbis[39m[0m
+[34m==>[0m [1mPouring libvorbis--1.3.7.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/libvorbis/1.3.7: 157 files, 2.5MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mspeex[39m[0m
+[34m==>[0m [1mPouring speex--1.2.1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/speex/1.2.1: 25 files, 823.4KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mtheora[39m[0m
+[34m==>[0m [1mPouring theora--1.2.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/theora/1.2.0: 126 files, 2.7MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibshout[39m[0m
+[34m==>[0m [1mPouring libshout--2.4.6_2.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libshout/2.4.6_2: 20 files, 363.8KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibsndfile[39m[0m
+[34m==>[0m [1mPouring libsndfile--1.2.2_1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libsndfile/1.2.2_1: 55 files, 1.6MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mglib-networking[39m[0m
+[34m==>[0m [1mPouring glib-networking--2.80.1.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/glib-networking/2.80.1: 79 files, 719.2KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibsoup[39m[0m
+[34m==>[0m [1mPouring libsoup--3.6.6.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/libsoup/3.6.6: 128 files, 2.2MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibusrsctp[39m[0m
+[34m==>[0m [1mPouring libusrsctp--0.9.5.0_1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libusrsctp/0.9.5.0_1: 9 files, 558.3KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mopencore-amr[39m[0m
+[34m==>[0m [1mPouring opencore-amr--0.1.6.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/opencore-amr/0.1.6: 17 files, 696.6KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibdeflate[39m[0m
+[34m==>[0m [1mPouring libdeflate--1.26.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/libdeflate/1.26: 17 files, 286.6KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mopenjph[39m[0m
+[34m==>[0m [1mPouring openjph--0.31.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/openjph/0.31.0: 25 files, 741.3KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mopenexr[39m[0m
+[34m==>[0m [1mPouring openexr--3.4.15.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/openexr/3.4.15: 212 files, 4.1MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mopenjpeg[39m[0m
+[34m==>[0m [1mPouring openjpeg--2.5.4.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/openjpeg/2.5.4: 512 files, 14.6MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32morc[39m[0m
+[34m==>[0m [1mPouring orc--0.4.42.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/orc/0.4.42: 55 files, 1.6MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mgobject-introspection[39m[0m
+[34m==>[0m [1mPouring gobject-introspection--1.86.0_3.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/gobject-introspection/1.86.0_3: 699 files, 6.3MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mpy3cairo[39m[0m
+[34m==>[0m [1mPouring py3cairo--1.29.1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/py3cairo/1.29.1: 22 files, 1MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mpygobject3[39m[0m
+[34m==>[0m [1mPouring pygobject3--3.56.3.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/pygobject3/3.56.3: 67 files, 1.6MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mrtmpdump[39m[0m
+[34m==>[0m [1mPouring rtmpdump--2.6.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/rtmpdump/2.6: 21 files, 436.2KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32msrt[39m[0m
+[34m==>[0m [1mPouring srt--1.5.6.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/srt/1.5.6: 21 files, 5.0MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32msrtp[39m[0m
+[34m==>[0m [1mPouring srtp--2.8.0.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/srtp/2.8.0: 15 files, 389.2KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mutf8cpp[39m[0m
+[34m==>[0m [1mPouring utf8cpp--4.2.0.all.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/utf8cpp/4.2.0: 15 files, 81.3KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mtaglib[39m[0m
+[34m==>[0m [1mPouring taglib--2.3.1.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/taglib/2.3.1: 154 files, 2.3MB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibcuefile[39m[0m
+[34m==>[0m [1mPouring libcuefile--r475.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/libcuefile/r475: 12 files, 225.6KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mlibreplaygain[39m[0m
+[34m==>[0m [1mPouring libreplaygain--r475.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/libreplaygain/r475: 7 files, 49.4KB
+[32m==>[0m [1mInstalling gstreamer dependency: [32mmusepack[39m[0m
+[34m==>[0m [1mPouring musepack--r475.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/musepack/r475: 26 files, 656.8KB
+[32m==>[0m [1mInstalling [32mgstreamer[39m[0m
+[34m==>[0m [1mPouring gstreamer--1.28.6_1.sonoma.bottle.1.tar.gz[0m
+🍺  /usr/local/Cellar/gstreamer/1.28.6_1: 1,346 files, 219.9MB
+[34m==>[0m [1mPouring molten-vk--1.4.2.sonoma.bottle.tar.gz[0m
+🍺  /usr/local/Cellar/molten-vk/1.4.2: 84 files, 92.2MB
+/usr/local/bin/autoreconf
+/usr/local/bin/autoconf
+/usr/local/bin/aclocal
+autoconf (GNU Autoconf) 2.73
