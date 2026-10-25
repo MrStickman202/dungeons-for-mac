@@ -81,6 +81,12 @@ on afterBar(s)
 	return text (o + 1) thru -1 of s
 end afterBar
 
+on upscaleLabel(v)
+	if v is "2" then return "2x"
+	if v is "1.5" then return "1.5x"
+	return "Off"
+end upscaleLabel
+
 on onOff(v)
 	if v is "1" then return "On"
 	return "Off"
@@ -585,7 +591,7 @@ end howToText
 on settingsMenu()
 	repeat
 		set statusRaw to my core("status")
-		set opts to {"Graphics: " & my rendererLabel(my valueFor(statusRaw, "renderer")), "Frame rate cap: " & my fpsLabel(my valueFor(statusRaw, "fps")), "Sharp mode (MetalFX upscaling): " & my onOff(my valueFor(statusRaw, "sharp")), "FPS counter (Metal HUD): " & my onOff(my valueFor(statusRaw, "hud")), "Start method: " & my launchLabel(my valueFor(statusRaw, "launch")), "Sync mode: " & my valueFor(statusRaw, "sync"), "Extra launch options: " & my argsLabel(my valueFor(statusRaw, "args")), "Reset all settings"}
+		set opts to {"Graphics: " & my rendererLabel(my valueFor(statusRaw, "renderer")), "Frame rate cap: " & my fpsLabel(my valueFor(statusRaw, "fps")), "Resolution upscaling (MetalFX): " & my upscaleLabel(my valueFor(statusRaw, "upscale")), "DLSS on MetalFX (upscaling + frame generation): " & my onOff(my valueFor(statusRaw, "metalfx")), "FPS counter (Metal HUD): " & my onOff(my valueFor(statusRaw, "hud")), "Start method: " & my launchLabel(my valueFor(statusRaw, "launch")), "Sync mode: " & my valueFor(statusRaw, "sync"), "Extra launch options: " & my argsLabel(my valueFor(statusRaw, "args")), "Reset all settings"}
 		set pick to choose from list opts with title "Dungeons for Mac" with prompt "Choose a setting to change:" OK button name "Change" cancel button name "Done"
 		if pick is false then return
 		set pick to item 1 of pick
@@ -613,12 +619,24 @@ on settingsMenu()
 					my core("set fps 0")
 				end if
 			end if
-		else if pick starts with "Sharp" then
-			if (my valueFor(statusRaw, "sharp")) is "1" then
-				my core("set sharp 0")
+		else if pick starts with "Resolution upscaling" then
+			set u to choose from list {"Off", "1.5x - game renders at 2/3 size, scaled up", "2x - game renders at half size, scaled up (fastest)"} with title "Dungeons for Mac" with prompt "Apple's MetalFX scales the game's picture up to fill the window. Set a lower resolution in the game's own video settings: it then runs faster and MetalFX keeps it sharp." & return & return & "Works in games that use DXMT (DirectX 11, like Minecraft Dungeons). For DirectX 12 games, use the game's own resolution scale or DLSS on MetalFX." OK button name "Use This" cancel button name "Back"
+			if u is not false then
+				set u to item 1 of u
+				if u starts with "1.5x" then
+					my core("set upscale 1.5")
+				else if u starts with "2x" then
+					my core("set upscale 2")
+				else
+					my core("set upscale off")
+				end if
+			end if
+		else if pick starts with "DLSS" then
+			if (my valueFor(statusRaw, "metalfx")) is "1" then
+				my core("set metalfx 0")
 			else
-				set b to my dlg("Sharp mode keeps the game rendering at the normal size and uses Apple's MetalFX to upscale it to full Retina resolution. Sharper text and edges for a small GPU cost." & return & return & "Works with the DXMT graphics backend.", {"Back", "Turn On"}, "Turn On")
-				if b is "Turn On" then my core("set sharp 1")
+				set b to my dlg("Makes games that support NVIDIA DLSS think there's an NVIDIA graphics card, and runs their DLSS option on Apple's MetalFX instead." & return & return & "Then pick DLSS in the game's video settings: upscaling makes it faster, and in DirectX 12 games that offer DLSS Frame Generation, MetalFX generates in-between frames for smoother motion." & return & return & "Only works in games that have a DLSS option. Minecraft Dungeons doesn't, and Bedrock only offers it with RTX ray tracing. Frame generation adds a little input delay and uses more memory.", {"Back", "Turn On"}, "Turn On")
+				if b is "Turn On" then my core("set metalfx 1")
 			end if
 		else if pick starts with "FPS counter" then
 			if (my valueFor(statusRaw, "hud")) is "1" then

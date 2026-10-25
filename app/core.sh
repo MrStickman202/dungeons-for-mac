@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=5   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=6   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -198,6 +198,7 @@ wine_env() { # setup | game | launcher
           export DYLD_FALLBACK_LIBRARY_PATH="$DYLD_FALLBACK_LIBRARY_PATH:$D3DM/external"
           export DYLD_FALLBACK_FRAMEWORK_PATH="$DYLD_FALLBACK_FRAMEWORK_PATH:$D3DM/external"
           [ "$fps" != 0 ] && export D3DM_MAX_FPS="$fps" DXMT_CONFIG="d3d11.preferredMaxFrameRate=$fps;"
+          # DLSS -> MetalFX: upscaling, and frame generation where the game offers DLSS Frame Generation
           [ "$(conf_get metalfx 0)" = 1 ] && export D3DM_ENABLE_METALFX=1
           ;;
         dxvk)
@@ -212,10 +213,15 @@ wine_env() { # setup | game | launcher
           export WINEDLLPATH_PREPEND="$ENG/renderers/dxmt/wine"
           local cfg=""
           [ "$fps" != 0 ] && cfg="d3d11.preferredMaxFrameRate=$fps;"
-          if [ "$(conf_get sharp 0)" = 1 ]; then
+          local up; up=$(upscale_setting)
+          if [ "$up" != off ]; then
+            # MetalFX spatial upscaling of the game's output: set the game to a lower
+            # resolution and it is scaled up by this factor to the window
             export DXMT_METALFX_SPATIAL_SWAPCHAIN=1
-            cfg="${cfg}d3d11.metalSpatialUpscaleFactor=2;"
+            cfg="${cfg}d3d11.metalSpatialUpscaleFactor=$up;"
           fi
+          # DLSS -> MetalFX: the game sees an NVIDIA GPU and its DLSS option runs on MetalFX
+          [ "$(conf_get metalfx 0)" = 1 ] && export DXMT_ENABLE_NVEXT=1
           [ -n "$cfg" ] && export DXMT_CONFIG="$cfg"
           ;;
       esac
@@ -232,6 +238,12 @@ wine_env() { # setup | game | launcher
       export WINEMSYNC=0 WINEESYNC=0
       ;;
   esac
+}
+
+upscale_setting() { # off | 1.5 | 2  (older builds stored sharp=1 for 2x)
+  local up; up=$(conf_get upscale "")
+  if [ -z "$up" ]; then if [ "$(conf_get sharp 0)" = 1 ]; then up=2; else up=off; fi; fi
+  echo "$up"
 }
 
 game_running() { pgrep -f "$SHIPPING_EXE" >/dev/null 2>&1; }
@@ -1084,6 +1096,32 @@ apply_controller_settings() {
   log "controller settings applied (rc $rc)"
 }
 
+# Where a game looks for NVIDIA's DLSS library (nvngx.dll). Set only while
+# "DLSS -> MetalFX" is on, so games don't offer DLSS otherwise.
+apply_dlss_settings() {
+  local want mark="$PREFIX/.dfm-dlss" reg="$PREFIX/drive_c/dfm-dlss.reg" rc
+  want=$(conf_get metalfx 0)
+  [ "$(cat "$mark" 2>/dev/null)" = "$want" ] && return 0
+  {
+    printf 'REGEDIT4\r\n\r\n'
+    if [ "$want" = 1 ]; then
+      printf '[HKEY_LOCAL_MACHINE\\SOFTWARE\\NVIDIA Corporation\\Global\\NGXCore]\r\n"FullPath"="C:\\\\Windows\\\\System32"\r\n\r\n'
+      printf '[HKEY_LOCAL_MACHINE\\SOFTWARE\\NVIDIA Corporation\\Global]\r\n"{41FCC608-8496-4DEF-B43E-7D9BD675A6FF}"=dword:00000001\r\n\r\n'
+      printf '[HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\nvlddmkm]\r\n"{41FCC608-8496-4DEF-B43E-7D9BD675A6FF}"=dword:00000001\r\n'
+    else
+      printf '[HKEY_LOCAL_MACHINE\\SOFTWARE\\NVIDIA Corporation\\Global\\NGXCore]\r\n"FullPath"=-\r\n\r\n'
+      printf '[HKEY_LOCAL_MACHINE\\SOFTWARE\\NVIDIA Corporation\\Global]\r\n"{41FCC608-8496-4DEF-B43E-7D9BD675A6FF}"=-\r\n\r\n'
+      printf '[HKEY_LOCAL_MACHINE\\SYSTEM\\ControlSet001\\Services\\nvlddmkm]\r\n"{41FCC608-8496-4DEF-B43E-7D9BD675A6FF}"=-\r\n'
+    fi
+  } > "$reg"
+  ( wine_env setup; "$WINE" reg import 'C:\dfm-dlss.reg' ) >> "$LOGS/setup.log" 2>&1
+  rc=$?
+  rm -f "$reg"
+  wait_server 30 || stop_server
+  [ $rc -eq 0 ] && echo "$want" > "$mark"
+  log "DLSS settings applied: $want (rc $rc)"
+}
+
 play_store() {
   local exe glog
   exe=$(conf_get "$EXE_KEY" "")
@@ -1094,10 +1132,11 @@ play_store() {
   start_service || { echo "error|The Xbox sign-in service didn't start. Choose More > Show Log."; return 0; }
   stop_server
   apply_controller_settings
+  apply_dlss_settings
   rotate_logs
   glog="$LOGS/game-$(date +%Y%m%d-%H%M%S).log"
-  printf 'Dungeons for Mac %s (build %s) - %s, exe=%s\nrenderer=%s fps=%s sharp=%s sync=%s\n----\n' \
-    "$DFM_VERSION" "$DFM_BUILD" "$GAME_NAME" "$exe" "$GAME_RENDERER" "$(conf_get fps 60)" "$(conf_get sharp 0)" "$(conf_get sync msync)" > "$glog"
+  printf 'Dungeons for Mac %s (build %s) - %s, exe=%s\nrenderer=%s fps=%s upscale=%s dlss=%s sync=%s\n----\n' \
+    "$DFM_VERSION" "$DFM_BUILD" "$GAME_NAME" "$exe" "$GAME_RENDERER" "$(conf_get fps 60)" "$(upscale_setting)" "$(conf_get metalfx 0)" "$(conf_get sync msync)" > "$glog"
   rm -f "$STATE/last_exit"
   mkdir -p "$AS/app"
   printf '#!/bin/bash\nexec /bin/bash %s __wine "$@"\n' "'$SELF'" > "$AS/app/wine-shim.sh" && chmod 755 "$AS/app/wine-shim.sh"
@@ -1437,6 +1476,7 @@ cmd_status() {
   echo "renderer=$(conf_get renderer dxmt)"
   echo "fps=$(conf_get fps 60)"
   echo "sharp=$(conf_get sharp 0)"
+  echo "upscale=$(upscale_setting)"
   echo "hud=$(conf_get hud 0)"
   echo "metalfx=$(conf_get metalfx 0)"
   echo "d3dmetal_license=$(conf_get d3dmetal_license 0)"
@@ -1458,6 +1498,7 @@ cmd_set() { # key value
     renderer) case "$v" in dxmt|dxvk|wined3d) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     fps)      case "$v" in 0|30|60|120) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     sharp|hud|metalfx) case "$v" in 0|1) ;; *) echo "error|bad value"; return 0 ;; esac ;;
+    upscale)  case "$v" in off|1.5|2) ;; *) echo "error|bad value"; return 0 ;; esac; conf_unset sharp ;;
     sync)     case "$v" in msync|esync|off) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     launch)   case "$v" in direct|bootstrap) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     args)     ;;
@@ -1469,7 +1510,7 @@ cmd_set() { # key value
 
 cmd_reset_settings() {
   local k
-  for k in renderer fps sharp hud sync launch args; do conf_unset "$k"; done
+  for k in renderer fps sharp upscale metalfx hud sync launch args; do conf_unset "$k"; done
   echo "ok|defaults"
 }
 
