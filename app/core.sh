@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=13   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=14   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -719,11 +719,15 @@ start_service() {
   client_env
   service_up && return 0
   [ -O "$XODUS_RUNTIME_DIR" ] || { echo "$XODUS_RUNTIME_DIR is not ours" >> "$LOGS/xodus-service.log"; return 1; }
+  # a service without its socket is stuck: replace it
+  pkill -f "$XSVC" >/dev/null 2>&1 && sleep 1
   rm -f "$XODUS_RUNTIME_DIR/xodus.sock"
-  ( trap '' HUP; exec "$XSVC" ) >> "$LOGS/xodus-service.log" 2>&1 < /dev/null &
+  echo "$(date '+%F %T') starting the sign-in service" >> "$LOGS/xodus-service.log"
+  ( trap '' HUP TERM; set -m; exec "$XSVC" ) >> "$LOGS/xodus-service.log" 2>&1 < /dev/null &
   local i=0
-  while [ $i -lt 20 ] && [ ! -S "$XODUS_RUNTIME_DIR/xodus.sock" ]; do sleep 0.5; i=$((i + 1)); done
-  [ -S "$XODUS_RUNTIME_DIR/xodus.sock" ]
+  # it reads the sign-in from the keychain first, which can wait on a macOS prompt
+  while [ $i -lt 60 ] && [ ! -S "$XODUS_RUNTIME_DIR/xodus.sock" ]; do sleep 0.5; i=$((i + 1)); done
+  [ -S "$XODUS_RUNTIME_DIR/xodus.sock" ] || { echo "$(date '+%F %T') the sign-in service made no socket in 30 s" >> "$LOGS/xodus-service.log"; return 1; }
 }
 
 # ---------------------------------------------------------------------------
@@ -1181,7 +1185,7 @@ play_store() {
     [ "$(conf_get d3dmetal_license 0)" = 1 ] || { echo "licence|$GAME_NAME needs Apple's D3DMetal, which needs you to accept Apple's licence first."; return 0; }
     [ -d "$D3DM/wine" ] || { echo "error|DirectX 12 support isn't installed yet. Choose Download again."; return 0; }
   fi
-  start_service || { echo "error|The Xbox sign-in service didn't start. Choose More > Show Log."; return 0; }
+  start_service || { echo "error|The Xbox sign-in service didn't start in time. If macOS asked about the keychain, choose Always Allow, then press Play again."; return 0; }
   stop_server
   apply_controller_settings
   apply_dlss_settings
