@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=3   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=4   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -911,7 +911,11 @@ job_storeinstall() { # [game id]
   cat "$STATE/stream.out" >> "$LOGS/store-download.log" 2>/dev/null
   if [ $rc -ne 0 ] || [ ! -f "$STORE_DIR/.xodus-streaming.msixvc" ]; then
     local last; last=$(printf '%s\n' "$err" | grep -v '^[[:space:]]*$' | tail -n 3 | cut -c1-300)
-    if printf '%s' "$err" | grep -qiE 'not entitled to this content|SatisfactionFailure'; then
+    if printf '%s' "$err" | grep -qiE 'Device group is full'; then
+      fail "Your Microsoft account has reached its limit of 10 devices for Store games, so Microsoft won't add this Mac.
+
+Unlink old devices you no longer use (old PCs, Parallels or other virtual machines) at account.microsoft.com/devices/content, then press Download again."
+    elif printf '%s' "$err" | grep -qiE 'not entitled to this content|SatisfactionFailure'; then
       fail "Microsoft says this account doesn't own $GAME_NAME. Sign in with the account that bought it.
 
 Microsoft's answer: $last"
