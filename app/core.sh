@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=7   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=8   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -855,7 +855,7 @@ function run(argv) {
         if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = null; } }
         (b || []).forEach(function (x) { if (x && x.BigId && kids.indexOf(x.BigId) < 0) kids.push(x.BigId); });
       });
-      out.push(p.ProductId + '|' + title + '|' + fmt + '|' + kids.join(','));
+      out.push(p.ProductId + '|' + title + '|' + fmt + '|' + kids.join(',') + '|' + String(p.ProductType || ''));
     });
   }
   return out.join('\n');
@@ -864,36 +864,52 @@ JS
 }
 
 catalog_rows() { # product ids on stdin -> id|title|format|children
-  local ids batch n=0 files="" f
-  ids=$(grep -E '^[A-Za-z0-9]{12}$' | sort -u)
+  local ids batch n=0 files="" f code out rc
+  ids=$(tr -d '\r' | grep -E '^[A-Za-z0-9]{12}$' | sort -u)
+  echo "catalog: $(printf '%s' "$ids" | grep -c .) ids" >> "$LOGS/library.log"
   [ -n "$ids" ] || return 0
-  rm -f "$STATE"/catalog-*.json
   while [ -n "$ids" ]; do
     batch=$(printf '%s\n' "$ids" | head -n 20 | paste -sd, -)
     ids=$(printf '%s\n' "$ids" | tail -n +21)
-    n=$((n + 1)); f="$STATE/catalog-$n.json"
-    /usr/bin/curl -fsS --max-time 25 -o "$f" "$CATALOG_URL?bigIds=$batch&market=US&languages=en-us" 2>> "$LOGS/library.log" \
-      && files="$files $f"
+    n=$((n + 1)); f="$STATE/catalog-$$-$n.json"
+    code=$(/usr/bin/curl -sS --max-time 25 -o "$f" -w '%{http_code}' "$CATALOG_URL?bigIds=$batch&market=US&languages=en-us" 2>> "$LOGS/library.log")
+    echo "catalog batch $n: HTTP $code, $(wc -c < "$f" 2>/dev/null | tr -d ' ') bytes" >> "$LOGS/library.log"
+    [ "$code" = 200 ] && files="$files $f"
   done
   [ -n "$files" ] || return 0
   # shellcheck disable=SC2086
-  /usr/bin/osascript -l JavaScript "$STATE/library.js" catalog $files 2>> "$LOGS/library.log"
+  out=$(/usr/bin/osascript -l JavaScript "$STATE/library.js" catalog $files 2>> "$LOGS/library.log"); rc=$?
+  echo "catalog: reader rc $rc, $(printf '%s' "$out" | tr '\r' '\n' | grep -c '|') rows" >> "$LOGS/library.log"
+  # shellcheck disable=SC2086
+  rm -f $files
+  printf '%s\n' "$out" | tr '\r' '\n'
 }
 
 library_build() { # -> $LIBRARY_CACHE as id|title|format
-  local rows kids
+  local rows kids owned rc
   library_js
   : > "$LOGS/library.log"
   client_env
-  "$XCLI" library --all --json > "$STATE/library.json" 2>> "$LOGS/library.log" || return 1
-  rows=$(/usr/bin/osascript -l JavaScript "$STATE/library.js" owned "$STATE/library.json" 2>> "$LOGS/library.log" | catalog_rows)
+  "$XCLI" library --all --json > "$STATE/library.json" 2>> "$LOGS/library.log" || { echo "client: library failed" >> "$LOGS/library.log"; return 1; }
+  echo "owned: $(wc -c < "$STATE/library.json" | tr -d ' ') bytes from Microsoft" >> "$LOGS/library.log"
+  owned=$(/usr/bin/osascript -l JavaScript "$STATE/library.js" owned "$STATE/library.json" 2>> "$LOGS/library.log"); rc=$?
+  owned=$(printf '%s\n' "$owned" | tr '\r' '\n')
+  echo "owned: reader rc $rc, $(printf '%s' "$owned" | grep -c .) products" >> "$LOGS/library.log"
+  if [ -z "$owned" ]; then
+    # fallback without the JavaScript reader: the client prints one key per line
+    owned=$(awk -F'"' '/"productId":/{id=$4} /"productType":/{t=$4} /"status":/{ if ($4=="Active" && t!="Durable" && t!="Consumable" && t!="Pass" && id!="") print id; id=""; t="" }' "$STATE/library.json")
+    echo "owned: fallback found $(printf '%s' "$owned" | grep -c .) products" >> "$LOGS/library.log"
+  fi
+  rows=$(printf '%s\n' "$owned" | catalog_rows)
   # a bundle (like Minecraft: Java & Bedrock Edition) has no package of its own: look up what's in it
   kids=$(printf '%s\n' "$rows" | cut -d'|' -f4 | tr ',' '\n' | grep -v '^$')
   if [ -n "$kids" ]; then
     rows=$(printf '%s\n%s\n' "$rows" "$(printf '%s\n' "$kids" | catalog_rows)")
   fi
-  printf '%s\n' "$rows" | grep '|' | cut -d'|' -f1-3 | awk -F'|' '!seen[$1]++' | sort -t'|' -k2,2f > "$LIBRARY_CACHE.new" \
-    && mv -f "$LIBRARY_CACHE.new" "$LIBRARY_CACHE"
+  # apps (like the Minecraft Launcher) can ship as MSIXVC too, but only games are listed as runnable
+  printf '%s\n' "$rows" | grep '|' | awk -F'|' 'BEGIN{OFS="|"} !seen[$1]++ { if ($3=="msixvc" && $5!="" && $5!="Game") $3="app"; print $1,$2,$3 }' \
+    | sort -t'|' -k2,2f > "$LIBRARY_CACHE.new" && mv -f "$LIBRARY_CACHE.new" "$LIBRARY_CACHE"
+  echo "library: $(grep -c '|msixvc$' "$LIBRARY_CACHE") runnable of $(grep -c . "$LIBRARY_CACHE")" >> "$LOGS/library.log"
 }
 
 cmd_library() { # [query] [refresh] -> ok|shown|others, then id|title|added rows

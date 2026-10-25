@@ -3,7 +3,7 @@
 name: repro
 on:
   push:
-    paths: [.github/workflows/repro.yml, .github/repro/**]
+    paths: [.github/workflows/repro.yml, .github/repro/**, app/core.sh]
 permissions:
   contents: write
 jobs:
