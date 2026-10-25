@@ -236,13 +236,17 @@ on gamesMenu()
 			set end of opts to (item 2 of parts) & "  -  " & my stateLabel(item 3 of parts)
 		end if
 	end repeat
+	set end of opts to "Find games you own..."
 	set end of opts to "Add a game by Store ID..."
 	set end of opts to "Settings..."
 	set end of opts to "More..."
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Your games:" default items {item 1 of opts} OK button name "Open" cancel button name "Quit"
 	if pick is false then return "quit"
 	set pick to item 1 of pick
-	if pick is "Add a game by Store ID..." then
+	if pick is "Find games you own..." then
+		my findGames()
+		return "back"
+	else if pick is "Add a game by Store ID..." then
 		my addStoreGame()
 		return "back"
 	else if pick is "Settings..." then
@@ -327,11 +331,23 @@ end acceptD3DMetal
 
 on gameMoreMenu(gameId, gameName)
 	set opts to {"Re-download / update", "Delete game files"}
-	if gameId is not "dungeons" and gameId is not "bedrock" then set end of opts to "Remove from the list"
+	if gameId is not "dungeons" and gameId is not "bedrock" then
+		set end of opts to "Graphics..."
+		set end of opts to "Remove from the list"
+	end if
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt gameName & ":" OK button name "Select" cancel button name "Back"
 	if pick is false then return
 	set pick to item 1 of pick
-	if pick starts with "Re-download" then
+	if pick is "Graphics..." then
+		set g to choose from list {"D3DMetal - DirectX 12 and 11 (works with most games)", "DXMT - DirectX 11 only (faster when the game is DirectX 11)"} with title "Dungeons for Mac" with prompt "Graphics for " & gameName & ":" OK button name "Use This" cancel button name "Back"
+		if g is not false then
+			if (item 1 of g) starts with "DXMT" then
+				my core("game-renderer " & quoted form of gameId & " dxmt")
+			else
+				my core("game-renderer " & quoted form of gameId & " d3dmetal")
+			end if
+		end if
+	else if pick starts with "Re-download" then
 		set res to my runJob("storeinstall " & gameId, "Downloading " & gameName)
 		my reportResult(res, "Downloaded.")
 	else if pick starts with "Delete" then
@@ -342,6 +358,81 @@ on gameMoreMenu(gameId, gameName)
 		if b is "Remove" then my dlg(my afterBar(my core("remove-game " & quoted form of gameId)), {"OK"}, "OK")
 	end if
 end gameMoreMenu
+
+on findGames()
+	try
+		my findGamesSteps()
+	on error number errNum
+		if errNum is not -128 then error number errNum
+	end try
+end findGames
+
+on findGamesSteps()
+	set d to display dialog "Search the games your Microsoft account owns." & return & return & "Type part of a name, or leave it empty to see all of them." default answer "" buttons {"Cancel", "Refresh List", "Search"} default button "Search" with title "Dungeons for Mac"
+	set q to text returned of d
+	set refreshArg to ""
+	if button returned of d is "Refresh List" then set refreshArg to " refresh"
+	display notification "Asking Microsoft which games you own..." with title "Dungeons for Mac"
+	set r to my core("library " & quoted form of q & refreshArg)
+	set lns to paragraphs of r
+	if (count of lns) is 0 then return
+	set head to my splitBar(item 1 of lns)
+	if (item 1 of head) is not "ok" then
+		my dlg(my afterBar(item 1 of lns), {"OK"}, "OK")
+		return
+	end if
+	set others to item 3 of head
+	set otherNote to ""
+	if others is not "0" then set otherNote to return & return & others & " other things you own are older Store apps (UWP), which can't run here yet, so they aren't listed."
+	set ids to {}
+	set titles to {}
+	set addedFlags to {}
+	set opts to {}
+	repeat with i from 2 to count of lns
+		set parts to my splitBar(item i of lns)
+		if (count of parts) >= 3 then
+			set end of ids to item 1 of parts
+			set end of titles to item 2 of parts
+			set end of addedFlags to item 3 of parts
+			if (item 3 of parts) is "1" then
+				set end of opts to (item 2 of parts) & "  -  already in your list"
+			else
+				set end of opts to item 2 of parts
+			end if
+		end if
+	end repeat
+	if (count of opts) is 0 then
+		if q is "" then
+			my dlg("None of your games are Xbox PC games that can run here." & otherNote, {"OK"}, "OK")
+		else
+			my dlg("No Xbox PC game you own matches \"" & q & "\"." & otherNote, {"OK"}, "OK")
+		end if
+		return
+	end if
+	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Xbox PC games you own (" & (count of opts) & "). Choose one to add it to your list. Not every game runs well under Wine yet." & otherNote OK button name "Add" cancel button name "Back"
+	if pick is false then return
+	set pick to item 1 of pick
+	repeat with i from 1 to count of opts
+		if (item i of opts) is pick then
+			if (item i of addedFlags) is "1" then
+				my dlg((item i of titles) & " is already in your games list.", {"OK"}, "OK")
+				return
+			end if
+			set a to my core("add-game " & quoted form of (item i of titles) & " " & quoted form of (item i of ids))
+			if a starts with "ok" then
+				set newId to my afterBar(a)
+				set b to my dlg((item i of titles) & " is in your games list now." & return & return & "Download it now? Microsoft checks that your account owns it first.", {"Later", "Download"}, "Download")
+				if b is "Download" then
+					set res to my runJob("storeinstall " & newId, "Downloading " & (item i of titles))
+					my reportResult(res, "Downloaded.")
+				end if
+			else
+				my dlg(my afterBar(a), {"OK"}, "OK")
+			end if
+			return
+		end if
+	end repeat
+end findGamesSteps
 
 on addStoreGame()
 	try

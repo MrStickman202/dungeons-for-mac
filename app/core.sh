@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=4   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=5   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -783,10 +783,128 @@ cmd_add_game() { # name product  -> adds a custom Store game
   if game_ids | grep -qx "$id" || printf '%s\n' "$BUILTIN_GAMES" | cut -d'|' -f3 | grep -qx "$product"; then
     echo "error|That game is already in the list."; return 0
   fi
-  conf_set "custom_$id" "$name|$product|dxmt|"
+  # D3DMetal runs both DirectX 12 and 11, so it is the safe start for an unknown
+  # title (most Xbox PC games are DirectX 12); the network fix only acts when
+  # the game ships Microsoft's XCurl.dll, which most do.
+  conf_set "custom_$id" "$name|$product|d3dmetal|xcurl"
   list=$(conf_get custom_games "")
   conf_set custom_games "${list:+$list,}$id"
   echo "ok|$id"
+}
+
+cmd_game_renderer() { # id dxmt|d3dmetal: graphics for an added game
+  local id="$1" r="$2" c name product setup
+  case "$r" in dxmt|d3dmetal) ;; *) echo "error|unknown graphics option"; return 0 ;; esac
+  case "$id" in dungeons|bedrock|'') echo "error|This game's graphics are set by the app."; return 0 ;; esac
+  c=$(conf_get "custom_$id" "")
+  [ -n "$c" ] || { echo "error|unknown game"; return 0; }
+  name=$(printf '%s' "$c" | cut -d'|' -f1); product=$(printf '%s' "$c" | cut -d'|' -f2); setup=$(printf '%s' "$c" | cut -d'|' -f4)
+  conf_set "custom_$id" "$name|$product|$r|$setup"
+  echo "ok|$r"
+}
+
+# --- Owned-games search ---------------------------------------------------------
+# What the account owns comes from Microsoft's collections service (through the
+# sign-in client); names and package formats come from the public Store catalog.
+# Only MSIXVC packages (Xbox PC / GDK games) can run here; older Store apps (UWP)
+# are counted but not listed.
+CATALOG_URL="https://displaycatalog.mp.microsoft.com/v7.0/products"
+LIBRARY_CACHE="$STATE/library.txt"
+
+library_js() { # writes the JSON reader (JavaScript for Automation ships with macOS)
+  cat > "$STATE/library.js" <<'JS'
+ObjC.import('Foundation');
+function read(p) { var s = $.NSString.stringWithContentsOfFileEncodingError(p, $.NSUTF8StringEncoding, null); return s.isNil() ? '' : s.js; }
+function run(argv) {
+  var out = [], skip = ['Durable', 'Consumable', 'UnmanagedConsumable', 'Pass'];
+  if (argv[0] === 'owned') {
+    var j; try { j = JSON.parse(read(argv[1])); } catch (e) { return ''; }
+    (j.items || []).forEach(function (i) {
+      if (i.productId && i.status === 'Active' && skip.indexOf(i.productType || '') < 0) out.push(i.productId);
+    });
+    return out.join('\n');
+  }
+  for (var k = 1; k < argv.length; k++) {
+    var c; try { c = JSON.parse(read(argv[k])); } catch (e) { continue; }
+    (c.Products || []).forEach(function (p) {
+      if (!p.ProductId) return;
+      var lp = (p.LocalizedProperties || [])[0] || {};
+      var title = String(lp.ProductTitle || p.ProductId).replace(/[|\r\n]+/g, ' ');
+      var fmt = 'none', kids = [];
+      (p.DisplaySkuAvailabilities || []).forEach(function (a) {
+        var pr = (a.Sku || {}).Properties || {};
+        (pr.Packages || []).forEach(function (pk) {
+          var f = String(pk.PackageFormat || '');
+          var pc = (pk.PlatformDependencies || []).some(function (d) { return d.PlatformName === 'Windows.Desktop' || d.PlatformName === 'Windows.Universal'; });
+          if (!pc) return;
+          if (f.toUpperCase() === 'MSIXVC') fmt = 'msixvc'; else if (fmt === 'none' && f) fmt = 'other';
+        });
+        var b = pr.BundledSkus;
+        if (typeof b === 'string') { try { b = JSON.parse(b); } catch (e) { b = null; } }
+        (b || []).forEach(function (x) { if (x && x.BigId && kids.indexOf(x.BigId) < 0) kids.push(x.BigId); });
+      });
+      out.push(p.ProductId + '|' + title + '|' + fmt + '|' + kids.join(','));
+    });
+  }
+  return out.join('\n');
+}
+JS
+}
+
+catalog_rows() { # product ids on stdin -> id|title|format|children
+  local ids batch n=0 files="" f
+  ids=$(grep -E '^[A-Za-z0-9]{12}$' | sort -u)
+  [ -n "$ids" ] || return 0
+  rm -f "$STATE"/catalog-*.json
+  while [ -n "$ids" ]; do
+    batch=$(printf '%s\n' "$ids" | head -n 20 | paste -sd, -)
+    ids=$(printf '%s\n' "$ids" | tail -n +21)
+    n=$((n + 1)); f="$STATE/catalog-$n.json"
+    /usr/bin/curl -fsS --max-time 25 -o "$f" "$CATALOG_URL?bigIds=$batch&market=US&languages=en-us" 2>> "$LOGS/library.log" \
+      && files="$files $f"
+  done
+  [ -n "$files" ] || return 0
+  # shellcheck disable=SC2086
+  /usr/bin/osascript -l JavaScript "$STATE/library.js" catalog $files 2>> "$LOGS/library.log"
+}
+
+library_build() { # -> $LIBRARY_CACHE as id|title|format
+  local rows kids
+  library_js
+  : > "$LOGS/library.log"
+  client_env
+  "$XCLI" library --all --json > "$STATE/library.json" 2>> "$LOGS/library.log" || return 1
+  rows=$(/usr/bin/osascript -l JavaScript "$STATE/library.js" owned "$STATE/library.json" 2>> "$LOGS/library.log" | catalog_rows)
+  # a bundle (like Minecraft: Java & Bedrock Edition) has no package of its own: look up what's in it
+  kids=$(printf '%s\n' "$rows" | cut -d'|' -f4 | tr ',' '\n' | grep -v '^$')
+  if [ -n "$kids" ]; then
+    rows=$(printf '%s\n%s\n' "$rows" "$(printf '%s\n' "$kids" | catalog_rows)")
+  fi
+  printf '%s\n' "$rows" | grep '|' | cut -d'|' -f1-3 | awk -F'|' '!seen[$1]++' | sort -t'|' -k2,2f > "$LIBRARY_CACHE.new" \
+    && mv -f "$LIBRARY_CACHE.new" "$LIBRARY_CACHE"
+}
+
+cmd_library() { # [query] [refresh] -> ok|shown|others, then id|title|added rows
+  local q="$1" refresh="$2" age rows shown others added id title fmt product
+  [ -x "$XCLI" ] || { echo "error|Run setup first."; return 0; }
+  [ "$(conf_get signed_in 0)" = 1 ] || { echo "error|Sign in with your Microsoft account first."; return 0; }
+  age=999999
+  [ -f "$LIBRARY_CACHE" ] && age=$(( $(date +%s) - $(stat -f %m "$LIBRARY_CACHE" 2>/dev/null || echo 0) ))
+  if [ "$refresh" = refresh ] || [ "$age" -gt 900 ] || [ ! -s "$LIBRARY_CACHE" ]; then
+    library_build || { echo "error|Couldn't get your games from Microsoft. Check your internet connection, or sign in again (More...)."; return 0; }
+  fi
+  [ -s "$LIBRARY_CACHE" ] || { echo "error|Microsoft didn't list any games for this account."; return 0; }
+  rows=$(grep -i -F -- "$q" "$LIBRARY_CACHE" 2>/dev/null)
+  [ -n "$q" ] || rows=$(cat "$LIBRARY_CACHE")
+  shown=$(printf '%s\n' "$rows" | grep -c '|msixvc$')
+  others=$(printf '%s\n' "$rows" | grep '|' | grep -vc '|msixvc$')
+  echo "ok|$shown|$others"
+  printf '%s\n' "$rows" | grep '|msixvc$' | while IFS='|' read -r product title fmt; do
+    id=$(printf '%s' "$product" | tr '[:upper:]' '[:lower:]')
+    added=0
+    if game_ids | grep -qx "$id" || printf '%s\n' "$BUILTIN_GAMES" | cut -d'|' -f3 | grep -qx "$product"; then added=1; fi
+    printf '%s|%s|%s\n' "$product" "$title" "$added"
+  done
 }
 
 cmd_remove_game() { # id: forget a custom game and delete its files
@@ -1383,6 +1501,9 @@ case "$cmd" in
   play)           cmd_play "$1" ;;
   games)          cmd_games ;;
   add-game)       cmd_add_game "$1" "$2" ;;
+  game-renderer)  cmd_game_renderer "$1" "$2" ;;
+  library)        cmd_library "$1" "$2" ;;
+  catalog)        mkdir -p "$STATE" "$LOGS"; library_js; printf '%s\n' "$@" | catalog_rows ;;
   remove-game)    cmd_remove_game "$1" ;;
   delete-files)   cmd_delete_files "$1" ;;
   d3dmetal-license) cmd_d3dmetal_license ;;

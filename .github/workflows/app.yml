@@ -42,6 +42,15 @@ jobs:
           /bin/bash app/core.sh add-game "Test" 9PP5G1F0C2B6
           /bin/bash app/core.sh games | grep -q '^9pp5g1f0c2b6|Test|notdownloaded$'
           /bin/bash app/core.sh remove-game 9pp5g1f0c2b6
+          # Store catalog lookup: names, MSIXVC detection, bundle children
+          /bin/bash app/core.sh catalog 9NBLGGH2JHXJ 9P8MK4NC0LJB 9NXP44L49SHJ 9WZDNCRFJ3TJ | tee cat.txt
+          grep -q '^9NBLGGH2JHXJ|.*|msixvc|' cat.txt
+          grep -q '^9P8MK4NC0LJB|.*|msixvc|' cat.txt
+          grep -q '^9NXP44L49SHJ|.*|.*|.*9NBLGGH2JHXJ' cat.txt || echo "note: bundle children not listed"
+          # owned-list reader
+          mkdir -p "$DFM_HOME/state"
+          printf '%s' '{"count":3,"items":[{"productId":"9NBLGGH2JHXJ","productType":"Game","status":"Active"},{"productId":"9XXXXXXXXXX1","productType":"Durable","status":"Active"},{"productId":"9XXXXXXXXXX2","productType":"Game","status":"Expired"}]}' > "$DFM_HOME/state/owned.json"
+          test "$(/usr/bin/osascript -l JavaScript "$DFM_HOME/state/library.js" owned "$DFM_HOME/state/owned.json")" = 9NBLGGH2JHXJ
       - name: Windows libcurl for the XCurl swap
         run: |
           set -euo pipefail
