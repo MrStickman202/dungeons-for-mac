@@ -36,7 +36,7 @@ jobs:
       - name: smoke-test the engine script
         run: |
           set -euo pipefail
-          export DFM_HOME="$RUNNER_TEMP/dfm-home/DungeonsForMac"
+          export DFM_HOME="$RUNNER_TEMP/dfm home/Application Support/DungeonsForMac"  # spaces, like the real path
           /bin/bash app/core.sh status
           /bin/bash app/core.sh games
           /bin/bash app/core.sh add-game "Test" 9PP5G1F0C2B6

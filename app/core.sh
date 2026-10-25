@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=9   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=10   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -864,7 +864,8 @@ JS
 }
 
 catalog_rows() { # product ids on stdin -> id|title|format|children
-  local ids batch n=0 files="" f code out rc
+  local ids batch n=0 f code out rc
+  local files=()   # an array: these paths contain spaces ("Application Support")
   ids=$(tr -d '\r' | grep -E '^[A-Za-z0-9]{12}$' | sort -u)
   echo "catalog: $(printf '%s' "$ids" | grep -c .) ids" >> "$LOGS/library.log"
   [ -n "$ids" ] || return 0
@@ -874,14 +875,12 @@ catalog_rows() { # product ids on stdin -> id|title|format|children
     n=$((n + 1)); f="$STATE/catalog-$$-$n.json"
     code=$(/usr/bin/curl -sS --max-time 25 -o "$f" -w '%{http_code}' "$CATALOG_URL?bigIds=$batch&market=US&languages=en-us" 2>> "$LOGS/library.log")
     echo "catalog batch $n: HTTP $code, $(wc -c < "$f" 2>/dev/null | tr -d ' ') bytes" >> "$LOGS/library.log"
-    [ "$code" = 200 ] && files="$files $f"
+    if [ "$code" = 200 ]; then files[${#files[@]}]="$f"; else rm -f "$f"; fi
   done
-  [ -n "$files" ] || return 0
-  # shellcheck disable=SC2086
-  out=$(/usr/bin/osascript -l JavaScript "$STATE/library.js" catalog $files 2>> "$LOGS/library.log"); rc=$?
+  [ ${#files[@]} -gt 0 ] || return 0
+  out=$(/usr/bin/osascript -l JavaScript "$STATE/library.js" catalog "${files[@]}" 2>> "$LOGS/library.log"); rc=$?
   echo "catalog: reader rc $rc, $(printf '%s' "$out" | tr '\r' '\n' | grep -c '|') rows" >> "$LOGS/library.log"
-  # shellcheck disable=SC2086
-  rm -f $files
+  rm -f "${files[@]}"
   printf '%s\n' "$out" | tr '\r' '\n'
 }
 
