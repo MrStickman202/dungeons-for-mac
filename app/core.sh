@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=11   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=12   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1112,14 +1112,15 @@ apply_controller_settings() {
   log "controller settings applied (rc $rc)"
 }
 
-# Display mode. Unreal and Unity games (most PC games) read these switches from
-# their command line; other games (like Minecraft Bedrock) use their own video
-# setting. Exclusive full screen also has the Mac driver capture the display.
+# Display mode. Unreal games (like Minecraft Dungeons) read -windowed and
+# -fullscreen from their command line; other games use their own video setting.
+# Only single "-switch" words: Unreal reads a bare word as the map to open, so a
+# switch with a separate value (Unity's "-screen-fullscreen 1") stops it starting.
+# Exclusive full screen also has the Mac driver capture the display.
 display_args() {
   case "$(conf_get display game)" in
-    windowed)   echo "-windowed -screen-fullscreen 0 -window-mode windowed" ;;
-    fullscreen) echo "-fullscreen -screen-fullscreen 1 -window-mode borderless" ;;
-    exclusive)  echo "-fullscreen -screen-fullscreen 1 -window-mode exclusive" ;;
+    windowed)             echo "-windowed" ;;
+    fullscreen|exclusive) echo "-fullscreen" ;;
   esac
 }
 

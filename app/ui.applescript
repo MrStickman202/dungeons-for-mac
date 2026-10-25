@@ -639,7 +639,7 @@ on settingsMenu()
 				end if
 			end if
 		else if pick starts with "Display mode" then
-			set m to choose from list {"Let the game decide (its own video settings)", "Windowed - a normal Mac window", "Full screen - borderless, switch apps freely", "Exclusive full screen - takes over the display"} with title "Dungeons for Mac" with prompt "How games open:" & return & return & "Works in Unreal and Unity games, like Minecraft Dungeons. Minecraft Bedrock uses its own Full Screen setting (Settings > Video). Exclusive full screen hides the menu bar and Dock completely and lets a game switch to a lower resolution, but switching to other apps is slower." OK button name "Use This" cancel button name "Back"
+			set m to choose from list {"Let the game decide (its own video settings)", "Windowed - a normal Mac window", "Full screen - borderless, switch apps freely", "Exclusive full screen - takes over the display"} with title "Dungeons for Mac" with prompt "How games open:" & return & return & "Works in Unreal games, like Minecraft Dungeons. Minecraft Bedrock uses its own Full Screen setting (Settings > Video). Exclusive full screen hides the menu bar and Dock completely and lets a game switch to a lower resolution, but switching to other apps is slower." OK button name "Use This" cancel button name "Back"
 			if m is not false then
 				set m to item 1 of m
 				if m starts with "Windowed" then
