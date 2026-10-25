@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=2   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=3   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -906,12 +906,25 @@ job_storeinstall() { # [game id]
   done
   wait "$pid"; local rc=$?
   rm -f "$STATE/child.pid"
+  # judge only the client's error output: progress lines hold byte counts ("…403…")
+  local err; err=$(grep -v '"progress"' "$LOGS/store-download.log" 2>/dev/null)
   cat "$STATE/stream.out" >> "$LOGS/store-download.log" 2>/dev/null
   if [ $rc -ne 0 ] || [ ! -f "$STORE_DIR/.xodus-streaming.msixvc" ]; then
-    if grep -qiE 'licen[cs]e|entitle|not owned|forbidden|403' "$LOGS/store-download.log"; then
-      fail "Microsoft says this account doesn't own $GAME_NAME. Sign in with the account that bought it."
-    elif grep -qiE 'uwp|appx|msixbundle|not an msixvc|Windows.Universal' "$LOGS/store-download.log"; then
-      fail "$GAME_NAME isn't an Xbox PC (MSIXVC) game, so it can't run here yet."
+    local last; last=$(printf '%s\n' "$err" | grep -v '^[[:space:]]*$' | tail -n 3 | cut -c1-300)
+    if printf '%s' "$err" | grep -qiE 'not entitled to this content|SatisfactionFailure'; then
+      fail "Microsoft says this account doesn't own $GAME_NAME. Sign in with the account that bought it.
+
+Microsoft's answer: $last"
+    elif printf '%s' "$err" | grep -qiE 'No \.msixvc file found'; then
+      fail "$GAME_NAME isn't an Xbox PC (MSIXVC) game, so it can't run here yet.
+
+$last"
+    elif [ -n "$last" ]; then
+      fail "The download didn't work (code $rc):
+
+$last
+
+Make a diagnostics report (More...) and send it over if this keeps happening."
     else
       fail "The download stopped (code $rc). Press Download again to resume."
     fi
