@@ -1,0 +1,9 @@
+total 32
+drwxr-xr-x  8 runner  staff   256 Oct 25 10:09 .
+drwxr-xr-x  7 runner  staff   224 Oct 25 10:09 ..
+-rw-r--r--  1 runner  staff  1855 Oct 25 10:09 library.js
+-rw-r--r--  1 runner  staff  4725 Oct 25 10:09 library.json
+-rw-r--r--  1 runner  staff   618 Oct 25 10:09 library.txt
+drwxr-xr-x  2 runner  staff    64 Oct 25 10:09 xodus
+drwxr-xr-x  2 runner  staff    64 Oct 25 10:09 xodus-cache
+drwxr-xr-x  2 runner  staff    64 Oct 25 10:09 xodus-data

@@ -1,0 +1,9 @@
+owned: 4725 bytes from Microsoft
+owned: reader rc 0, 7 products
+catalog: 7 ids
+catalog batch 1: HTTP 200, 873721 bytes
+catalog: reader rc 0, 7 rows
+catalog: 12 ids
+catalog batch 1: HTTP 200, 681088 bytes
+catalog: reader rc 0, 12 rows
+library: 4 runnable of 17

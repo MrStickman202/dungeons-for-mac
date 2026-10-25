@@ -1,0 +1,17 @@
+CFQ7TTC0K7Q8|Access|other
+CFQ7TTC0K7DX|Excel|other
+9WZDNCRFHWLH|HP Smart|other
+9WZDNCRD29V9|Microsoft 365 Copilot|other
+CFQ7TTC0K5DM|Microsoft 365 Family|none
+9P8MK4NC0LJB|Minecraft Dungeons for Windows|msixvc
+9NBLGGH2JHXJ|Minecraft for Windows|msixvc
+9PGW18NPBZV5|Minecraft Launcher|msixvc
+9NXP44L49SHJ|Minecraft: Java & Bedrock Edition for PC|none
+9PJ8266BHFWN|Minecraft: Java Edition|msixvc
+9WZDNCRFJ3TJ|Netflix|other
+CFQ7TTC0TS2G|OneDrive for M365|none
+9WZDNCRFHVJL|OneNote for Windows 10 (Legacy)|other
+CFQ7TTC0K7C4|Outlook|other
+CFQ7TTC0K7C6|PowerPoint|other
+CFQ7TTC0K7C3|Publisher|other
+CFQ7TTC0K7C7|Word|other

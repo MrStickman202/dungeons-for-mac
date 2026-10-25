@@ -1,0 +1,6 @@
+ok|4|13
+9P8MK4NC0LJB|Minecraft Dungeons for Windows|1
+9NBLGGH2JHXJ|Minecraft for Windows|1
+9PGW18NPBZV5|Minecraft Launcher|0
+9PJ8266BHFWN|Minecraft: Java Edition|0
+rc=0
