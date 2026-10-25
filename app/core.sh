@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=6   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=7   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1363,6 +1363,9 @@ cmd_diag() {
     done
   } > "$dir/DungeonsForMac-diagnostics/summary.txt" 2>&1
   cp "$LOGS"/*.log "$dir/DungeonsForMac-diagnostics/" 2>/dev/null
+  # game search: what Microsoft listed (product IDs and entitlement types) and what was read from it
+  head -c 40000 "$STATE/library.json" > "$dir/DungeonsForMac-diagnostics/library-owned.json" 2>/dev/null
+  cp "$LIBRARY_CACHE" "$dir/DungeonsForMac-diagnostics/library.txt" 2>/dev/null
   out="$HOME/Desktop/DungeonsForMac-diagnostics-$stamp.zip"
   (cd "$dir" && zip -qr "$out" DungeonsForMac-diagnostics) || { rm -rf "$dir"; echo "error|Couldn't write the report."; return 0; }
   rm -rf "$dir"
