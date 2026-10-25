@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=8   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=9   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -906,8 +906,9 @@ library_build() { # -> $LIBRARY_CACHE as id|title|format
   if [ -n "$kids" ]; then
     rows=$(printf '%s\n%s\n' "$rows" "$(printf '%s\n' "$kids" | catalog_rows)")
   fi
-  # apps (like the Minecraft Launcher) can ship as MSIXVC too, but only games are listed as runnable
-  printf '%s\n' "$rows" | grep '|' | awk -F'|' 'BEGIN{OFS="|"} !seen[$1]++ { if ($3=="msixvc" && $5!="" && $5!="Game") $3="app"; print $1,$2,$3 }' \
+  # apps can ship as MSIXVC too, but only games are listed as runnable; the Minecraft
+  # Launcher and Java Edition are Java launchers, not Xbox games, so they're left out
+  printf '%s\n' "$rows" | grep '|' | awk -F'|' 'BEGIN{OFS="|"} !seen[$1]++ { if ($3=="msixvc" && $5!="" && $5!="Game") $3="app"; if ($1=="9PGW18NPBZV5" || $1=="9PJ8266BHFWN") $3="app"; print $1,$2,$3 }' \
     | sort -t'|' -k2,2f > "$LIBRARY_CACHE.new" && mv -f "$LIBRARY_CACHE.new" "$LIBRARY_CACHE"
   echo "library: $(grep -c '|msixvc$' "$LIBRARY_CACHE") runnable of $(grep -c . "$LIBRARY_CACHE")" >> "$LOGS/library.log"
 }
