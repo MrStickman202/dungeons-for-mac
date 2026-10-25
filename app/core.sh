@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=12   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=13   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1112,6 +1112,16 @@ apply_controller_settings() {
   log "controller settings applied (rc $rc)"
 }
 
+# RAM disks the sign-in client left behind (a launch that was stopped before it
+# could clean up). Only when no game is running.
+detach_stale_ramdisks() {
+  pgrep -f "$XCLI run" >/dev/null 2>&1 && return 0
+  local d
+  for d in $(hdiutil info 2>/dev/null | awk '/^\/dev\/disk[0-9]+/ && /\/Volumes\/xodus-/ {print $1}'); do
+    hdiutil detach -force "$d" >/dev/null 2>&1 && log "detached a leftover RAM disk ($d)"
+  done
+}
+
 # Display mode. Unreal games (like Minecraft Dungeons) read -windowed and
 # -fullscreen from their command line; other games use their own video setting.
 # Only single "-switch" words: Unreal reads a bare word as the map to open, so a
@@ -1185,13 +1195,20 @@ play_store() {
   printf '#!/bin/bash\nexec /bin/bash %s __wine "$@"\n' "'$SELF'" > "$AS/app/wine-shim.sh" && chmod 755 "$AS/app/wine-shim.sh"
   cd "$STORE_DIR" || { echo "error|The game folder is missing."; return 0; }
   export DFM_GAME="$GAME_ID"
+  detach_stale_ramdisks
   (
-    trap '' HUP
+    # Not tied to the window that pressed Play: ignore hangup/terminate (the
+    # game inherits that) and run in a process group of its own.
+    trap '' HUP TERM
+    set -m
     start=$(date +%s)
+    echo "launch: asking Microsoft for the licence and decrypting the game..."
     # The client decrypts the game onto a RAM disk and starts "$SELF __wine",
     # which sets the graphics environment and execs this engine's wine.
-    "$XCLI" run -e "$exe" "$STORE_DIR" "$AS/app/wine-shim.sh"
+    RUST_BACKTRACE=1 "$XCLI" run -e "$exe" "$STORE_DIR" "$AS/app/wine-shim.sh" &
+    wait $!
     code=$?
+    echo "launch: the sign-in client finished with code $code"
     echo "$code $(( $(date +%s) - start ))" > "$STATE/last_exit"
   ) >> "$glog" 2>&1 < /dev/null &
   log "play ($GAME_ID): $exe"
@@ -1205,6 +1222,7 @@ cmd_wine_shim() { # called by xodus-cli as its "wine": inherited fds stay open a
   client_env
   export WINE_GAMEINPUT=1
   export WINEDEBUG="${DFM_WINEDEBUG:-fixme-all,warn+hid,warn+ginput,warn+xinput}"
+  echo "launch: game decrypted, starting the Windows layer ($GAME_RENDERER graphics, display $(conf_get display game))" >&2
   # The client starts "wine <game.exe>"; display mode and extra launch options
   # go after it as the game's own command line.
   local extra=() a
@@ -1401,6 +1419,12 @@ cmd_diag() {
     echo; echo "== game folder"; ls -la "$(conf_get game_root "")" 2>/dev/null
     echo; echo "== controllers macOS sees"
     if is_mac; then ioreg -r -c IOHIDDevice -l 2>/dev/null | grep -E '"Product"|"PrimaryUsagePage"|"Transport"' | sed -n '1,60p'; fi
+    echo; echo "== processes (game, Windows layer, sign-in client)"
+    ps -axo pid,ppid,stat,rss,etime,command 2>/dev/null | grep -iE 'xodus|wine|Dungeons|Minecraft|\.exe' | grep -v grep | cut -c1-220
+    echo; echo "== RAM disks"; hdiutil info 2>/dev/null | grep -E 'image-path|/dev/disk|xodus' | head -40
+    echo; echo "== memory"; vm_stat 2>/dev/null | head -12; memory_pressure -Q 2>/dev/null | tail -2
+    echo; echo "== recent crash reports"
+    ls -t "$HOME/Library/Logs/DiagnosticReports" 2>/dev/null | grep -iE 'xodus|wine|Dungeons|Minecraft' | head -10
     echo; echo "== games"; cmd_games
     for g in $(game_ids); do
       select_game "$g" || continue
