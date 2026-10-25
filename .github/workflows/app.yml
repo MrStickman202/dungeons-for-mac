@@ -47,6 +47,14 @@ jobs:
           /bin/bash app/core.sh set upscale 1.5 | grep -q '^ok'
           /bin/bash app/core.sh status | grep -qx 'upscale=1.5'
           /bin/bash app/core.sh reset-settings >/dev/null 2>&1 || true
+          # the wine shim under macOS's bash 3.2, with a stand-in wine
+          printf '#!/bin/bash\nfor a in "$@"; do echo "[$a]"; done\n' > "$RUNNER_TEMP/fakewine"; chmod +x "$RUNNER_TEMP/fakewine"
+          /bin/bash app/core.sh set display fullscreen >/dev/null
+          out=$(DFM_TEST_WINE="$RUNNER_TEMP/fakewine" DFM_GAME=dungeons /bin/bash app/core.sh __wine 'Z:\x\Dungeons.exe' 2>&1); echo "$out"
+          echo "$out" | grep -qx '\[-fullscreen\]'
+          /bin/bash app/core.sh set display game >/dev/null
+          out=$(DFM_TEST_WINE="$RUNNER_TEMP/fakewine" DFM_GAME=dungeons /bin/bash app/core.sh __wine 'Z:\x\Dungeons.exe' 2>&1); echo "$out"
+          test "$out" = '[Z:\x\Dungeons.exe]'
           # Store catalog lookup: names, MSIXVC detection, bundle children
           /bin/bash app/core.sh catalog 9NBLGGH2JHXJ 9P8MK4NC0LJB 9NXP44L49SHJ 9WZDNCRFJ3TJ | tee cat.txt
           grep -q '^9NBLGGH2JHXJ|.*|msixvc|' cat.txt
