@@ -81,6 +81,13 @@ on afterBar(s)
 	return text (o + 1) thru -1 of s
 end afterBar
 
+on displayLabel(v)
+	if v is "windowed" then return "Windowed"
+	if v is "fullscreen" then return "Full screen"
+	if v is "exclusive" then return "Exclusive full screen"
+	return "Game decides"
+end displayLabel
+
 on upscaleLabel(v)
 	if v is "2" then return "2x"
 	if v is "1.5" then return "1.5x"
@@ -389,7 +396,7 @@ on findGamesSteps()
 	end if
 	set others to item 3 of head
 	set otherNote to ""
-	if others is not "0" then set otherNote to return & return & others & " other things you own are older Store apps (UWP), which can't run here yet, so they aren't listed."
+	if others is not "0" then set otherNote to return & return & others & " other things you own are apps, or games in the older Store format (UWP), which can't run here yet, so they aren't listed."
 	set ids to {}
 	set titles to {}
 	set addedFlags to {}
@@ -591,7 +598,7 @@ end howToText
 on settingsMenu()
 	repeat
 		set statusRaw to my core("status")
-		set opts to {"Graphics: " & my rendererLabel(my valueFor(statusRaw, "renderer")), "Frame rate cap: " & my fpsLabel(my valueFor(statusRaw, "fps")), "Resolution upscaling (MetalFX): " & my upscaleLabel(my valueFor(statusRaw, "upscale")), "DLSS on MetalFX (upscaling + frame generation): " & my onOff(my valueFor(statusRaw, "metalfx")), "FPS counter (Metal HUD): " & my onOff(my valueFor(statusRaw, "hud")), "Start method: " & my launchLabel(my valueFor(statusRaw, "launch")), "Sync mode: " & my valueFor(statusRaw, "sync"), "Extra launch options: " & my argsLabel(my valueFor(statusRaw, "args")), "Reset all settings"}
+		set opts to {"Graphics: " & my rendererLabel(my valueFor(statusRaw, "renderer")), "Frame rate cap: " & my fpsLabel(my valueFor(statusRaw, "fps")), "Resolution upscaling (MetalFX): " & my upscaleLabel(my valueFor(statusRaw, "upscale")), "DLSS on MetalFX (upscaling + frame generation): " & my onOff(my valueFor(statusRaw, "metalfx")), "Display mode: " & my displayLabel(my valueFor(statusRaw, "display")), "FPS counter (Metal HUD): " & my onOff(my valueFor(statusRaw, "hud")), "Start method: " & my launchLabel(my valueFor(statusRaw, "launch")), "Sync mode: " & my valueFor(statusRaw, "sync"), "Extra launch options: " & my argsLabel(my valueFor(statusRaw, "args")), "Reset all settings"}
 		set pick to choose from list opts with title "Dungeons for Mac" with prompt "Choose a setting to change:" OK button name "Change" cancel button name "Done"
 		if pick is false then return
 		set pick to item 1 of pick
@@ -629,6 +636,20 @@ on settingsMenu()
 					my core("set upscale 2")
 				else
 					my core("set upscale off")
+				end if
+			end if
+		else if pick starts with "Display mode" then
+			set m to choose from list {"Let the game decide (its own video settings)", "Windowed - a normal Mac window", "Full screen - borderless, switch apps freely", "Exclusive full screen - takes over the display"} with title "Dungeons for Mac" with prompt "How games open:" & return & return & "Works in Unreal and Unity games, like Minecraft Dungeons. Minecraft Bedrock uses its own Full Screen setting (Settings > Video). Exclusive full screen hides the menu bar and Dock completely and lets a game switch to a lower resolution, but switching to other apps is slower." OK button name "Use This" cancel button name "Back"
+			if m is not false then
+				set m to item 1 of m
+				if m starts with "Windowed" then
+					my core("set display windowed")
+				else if m starts with "Full screen" then
+					my core("set display fullscreen")
+				else if m starts with "Exclusive" then
+					my core("set display exclusive")
+				else
+					my core("set display game")
 				end if
 			end if
 		else if pick starts with "DLSS" then

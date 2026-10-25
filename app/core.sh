@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=10   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=11   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1112,6 +1112,31 @@ apply_controller_settings() {
   log "controller settings applied (rc $rc)"
 }
 
+# Display mode. Unreal and Unity games (most PC games) read these switches from
+# their command line; other games (like Minecraft Bedrock) use their own video
+# setting. Exclusive full screen also has the Mac driver capture the display.
+display_args() {
+  case "$(conf_get display game)" in
+    windowed)   echo "-windowed -screen-fullscreen 0 -window-mode windowed" ;;
+    fullscreen) echo "-fullscreen -screen-fullscreen 1 -window-mode borderless" ;;
+    exclusive)  echo "-fullscreen -screen-fullscreen 1 -window-mode exclusive" ;;
+  esac
+}
+
+apply_display_settings() {
+  local want mark="$PREFIX/.dfm-display" reg="$PREFIX/drive_c/dfm-display.reg" rc cap=n
+  want=$(conf_get display game)
+  [ "$want" = exclusive ] && cap=y
+  [ "$(cat "$mark" 2>/dev/null)" = "$cap" ] && return 0
+  printf 'REGEDIT4\r\n\r\n[HKEY_CURRENT_USER\\Software\\Wine\\Mac Driver]\r\n"CaptureDisplaysForFullscreen"="%s"\r\n' "$cap" > "$reg"
+  ( wine_env setup; "$WINE" reg import 'C:\dfm-display.reg' ) >> "$LOGS/setup.log" 2>&1
+  rc=$?
+  rm -f "$reg"
+  wait_server 30 || stop_server
+  [ $rc -eq 0 ] && echo "$cap" > "$mark"
+  log "display settings applied: $want (rc $rc)"
+}
+
 # Where a game looks for NVIDIA's DLSS library (nvngx.dll). Set only while
 # "DLSS -> MetalFX" is on, so games don't offer DLSS otherwise.
 apply_dlss_settings() {
@@ -1149,6 +1174,7 @@ play_store() {
   stop_server
   apply_controller_settings
   apply_dlss_settings
+  apply_display_settings
   rotate_logs
   glog="$LOGS/game-$(date +%Y%m%d-%H%M%S).log"
   printf 'Dungeons for Mac %s (build %s) - %s, exe=%s\nrenderer=%s fps=%s upscale=%s dlss=%s sync=%s\n----\n' \
@@ -1178,6 +1204,13 @@ cmd_wine_shim() { # called by xodus-cli as its "wine": inherited fds stay open a
   client_env
   export WINE_GAMEINPUT=1
   export WINEDEBUG="${DFM_WINEDEBUG:-fixme-all,warn+hid,warn+ginput,warn+xinput}"
+  # The client starts "wine <game.exe>"; display mode and extra launch options
+  # go after it as the game's own command line.
+  local extra=() a
+  for a in $(display_args); do extra[${#extra[@]}]="$a"; done
+  # shellcheck disable=SC2086
+  for a in $(conf_get args ""); do extra[${#extra[@]}]="$a"; done
+  if [ ${#extra[@]} -gt 0 ]; then exec "$WINE" "$@" "${extra[@]}"; fi
   exec "$WINE" "$@"
 }
 
@@ -1502,6 +1535,7 @@ cmd_status() {
   echo "sync=$(conf_get sync msync)"
   echo "launch=$(conf_get launch direct)"
   echo "args=$(conf_get args "")"
+  echo "display=$(conf_get display game)"
   if [ -f "$STATE/last_exit" ]; then
     local code secs
     read -r code secs < "$STATE/last_exit"
@@ -1521,6 +1555,7 @@ cmd_set() { # key value
     sync)     case "$v" in msync|esync|off) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     launch)   case "$v" in direct|bootstrap) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     args)     ;;
+    display)  case "$v" in game|windowed|fullscreen|exclusive) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     *) echo "error|unknown setting"; return 0 ;;
   esac
   conf_set "$k" "$v"
@@ -1529,7 +1564,7 @@ cmd_set() { # key value
 
 cmd_reset_settings() {
   local k
-  for k in renderer fps sharp upscale metalfx hud sync launch args; do conf_unset "$k"; done
+  for k in renderer fps sharp upscale metalfx display hud sync launch args; do conf_unset "$k"; done
   echo "ok|defaults"
 }
 

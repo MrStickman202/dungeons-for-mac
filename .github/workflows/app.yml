@@ -42,6 +42,11 @@ jobs:
           /bin/bash app/core.sh add-game "Test" 9PP5G1F0C2B6
           /bin/bash app/core.sh games | grep -q '^9pp5g1f0c2b6|Test|notdownloaded$'
           /bin/bash app/core.sh remove-game 9pp5g1f0c2b6
+          /bin/bash app/core.sh set display exclusive | grep -q '^ok'
+          /bin/bash app/core.sh status | grep -qx 'display=exclusive'
+          /bin/bash app/core.sh set upscale 1.5 | grep -q '^ok'
+          /bin/bash app/core.sh status | grep -qx 'upscale=1.5'
+          /bin/bash app/core.sh reset-settings >/dev/null 2>&1 || true
           # Store catalog lookup: names, MSIXVC detection, bundle children
           /bin/bash app/core.sh catalog 9NBLGGH2JHXJ 9P8MK4NC0LJB 9NXP44L49SHJ 9WZDNCRFJ3TJ | tee cat.txt
           grep -q '^9NBLGGH2JHXJ|.*|msixvc|' cat.txt
