@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=19   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=20   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1599,8 +1599,8 @@ cmd_steam_status() {
   echo "overlay=$(conf_get steam_overlay 0)"
 }
 
-cmd_steam_games() { # [refresh] -> appid|name|state|percent   (state: ready, downloading, notinstalled)
-  local f id name flags got total pct owned installed missing
+cmd_steam_games() { # [all] -> appid|name|state|percent   (state: ready, downloading, notinstalled)
+  local f id name flags got total pct owned installed missing want_all="$1"
   : > "$STATE/steam-rows.txt"
   installed=""
   for f in "$STEAM_ROOT"/steamapps/appmanifest_*.acf; do
@@ -1618,7 +1618,8 @@ cmd_steam_games() { # [refresh] -> appid|name|state|percent   (state: ready, dow
     fi
     installed="$installed $id "
   done
-  owned=$(ls "$STEAM_ROOT/appcache/librarycache" 2>/dev/null | grep -E '^[0-9]+$')
+  owned=""
+  [ "$want_all" = all ] && owned=$(ls "$STEAM_ROOT/appcache/librarycache" 2>/dev/null | grep -E '^[0-9]+$')
   touch "$STEAM_NAMES"
   missing=$(for id in $owned; do grep -q "^$id|" "$STEAM_NAMES" || echo "$id"; done)
   [ -n "$missing" ] && printf '%s\n' "$missing" | steam_fetch_names

@@ -533,6 +533,10 @@ on steamStateLabel(steamRaw, pct)
 end steamStateLabel
 
 on steamMenu()
+	return my steamMenuFor("")
+end steamMenu
+
+on steamMenuFor(listKind)
 	set steamRaw to my core("steam-status")
 	if (my valueFor(steamRaw, "ready")) is not "1" then
 		set b to my dlg(my steamSetupText(), {"Back", "Set Up Steam"}, "Set Up Steam")
@@ -548,7 +552,7 @@ on steamMenu()
 		return "back"
 	end if
 	display notification "Reading your Steam library..." with title "Dungeons for Mac"
-	set rawGames to my core("steam-games")
+	set rawGames to my core("steam-games " & listKind)
 	set ids to {}
 	set names to {}
 	set states to {}
@@ -565,18 +569,35 @@ on steamMenu()
 		end if
 	end repeat
 	set gameCount to count of opts
+	if listKind is "all" then
+		set end of opts to "Show installed games only"
+	else
+		set end of opts to "Install a game you own..."
+	end if
 	set end of opts to "Open Steam (store, downloads, friends)..."
 	set end of opts to "Refresh the list"
 	set end of opts to "Settings..."
 	set end of opts to "Steam options..."
 	set end of opts to "More..."
 	set end of opts to "Choose Steam or Microsoft Store..."
-	set promptText to "Your Steam games:"
-	if gameCount is 0 then set promptText to "No games yet. Steam fills this list after you sign in and its library loads; choose Open Steam, wait for your library, then Refresh."
+	set promptText to "Your installed Steam games:"
+	if listKind is "all" then set promptText to "Every game you own on Steam (choose one to install it):"
+	if gameCount is 0 then
+		if listKind is "all" then
+			set promptText to "No games found yet. Steam fills this after you sign in and your library loads in its window; then Refresh."
+		else
+			set promptText to "No games installed yet. Choose Install a game you own, or install one in the Steam window."
+		end if
+	end if
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt promptText default items {item 1 of opts} OK button name "Open" cancel button name "Quit"
 	if pick is false then return "quit"
 	set pick to item 1 of pick
 	if pick is "Choose Steam or Microsoft Store..." then return "switch"
+	if pick is "Install a game you own..." then
+		display notification "Reading every game you own (the first time looks up their names)..." with title "Dungeons for Mac"
+		return my steamMenuFor("all")
+	end if
+	if pick is "Show installed games only" then return "back"
 	if pick starts with "Open Steam" then
 		my dlg(my afterBar(my core("steam-open")), {"OK"}, "OK")
 		return "back"
