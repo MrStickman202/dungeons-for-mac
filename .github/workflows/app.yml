@@ -64,7 +64,7 @@ jobs:
           printf '"AppState"\n{\n\t"appid"\t\t"815370"\n\t"name"\t\t"Green Hell"\n\t"StateFlags"\t\t"4"\n\t"installdir"\t\t"Green Hell"\n}\n' > "$R/steamapps/appmanifest_815370.acf"
           printf '"AppState"\n{\n\t"appid"\t\t"400"\n\t"name"\t\t"Portal"\n\t"StateFlags"\t\t"1026"\n\t"BytesToDownload"\t\t"1000"\n\t"BytesDownloaded"\t\t"250"\n}\n' > "$R/steamapps/appmanifest_400.acf"
           /bin/bash app/core.sh steam-games all | tee sg.txt
-          /bin/bash app/core.sh steam-games | grep -c notinstalled | grep -qx 0
+          test "$(/bin/bash app/core.sh steam-games | grep -c notinstalled || true)" = 0
           grep -qx '815370|Green Hell|ready|' sg.txt
           grep -qx '400|Portal|downloading|25' sg.txt
           grep -q '^220|Half-Life 2|notinstalled|' sg.txt || { echo "note: store name lookup for 220:"; cat "$DFM_HOME/state/steam-names.txt"; exit 1; }
