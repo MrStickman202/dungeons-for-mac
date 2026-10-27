@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=20   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=21   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1424,12 +1424,48 @@ game_display_args() { # install folder -> display switches in that engine's own 
   fi
 }
 
+# Steam's window: its Chromium compositor runs in a separate GPU process, which
+# can crash under Wine on macOS; Chromium then falls back to a path that never
+# reaches the window and Steam stays black (seen on this Mac: the GPU process came
+# back with --use-gl=disabled right after sign-in). A small stand-in for
+# steamwebhelper.exe (app/steam/webhelper-wrapper.c, from this repository) starts
+# the real one with its compositing in its own process. Steam restores its own
+# files when it updates or verifies, so it is put back before every start, and
+# -noverifyfiles keeps Steam from undoing it in between.
+steam_fix_webhelper() {
+  local dir="$STEAM_ROOT/bin/cef/cef.win64" w="$AS/steam-tools/steamwebhelper-wrapper.exe" want have u
+  [ -d "$dir" ] || return 0
+  [ "$(conf_get steam_gpu_window 0)" = 1 ] && { [ -f "$dir/steamwebhelper_real.exe" ] && mv -f "$dir/steamwebhelper_real.exe" "$dir/steamwebhelper.exe"; return 0; }
+  want=$(/usr/bin/curl -fsSL --max-time 15 "$DFM_APPREL/steamwebhelper-wrapper.exe.sha256" 2>/dev/null | awk '{print $1}')
+  if [ ! -f "$w" ] || { [ -n "$want" ] && ! sha_ok "$w" "$want"; }; then
+    mkdir -p "$AS/steam-tools"
+    /usr/bin/curl -fsSL --max-time 60 -o "$w.part" "$DFM_APPREL/steamwebhelper-wrapper.exe" 2>> "$LOGS/steam.log" \
+      && { [ -z "$want" ] || sha_ok "$w.part" "$want"; } && mv -f "$w.part" "$w"
+    rm -f "$w.part"
+  fi
+  [ -f "$w" ] || { log "Steam window fix: couldn't download the web helper stand-in"; return 0; }
+  have=$(shasum -a 256 "$dir/steamwebhelper.exe" 2>/dev/null | awk '{print $1}')
+  if [ "$have" != "$(shasum -a 256 "$w" | awk '{print $1}')" ]; then
+    # a new helper from Steam (first start or an update) becomes the real one
+    [ -f "$dir/steamwebhelper.exe" ] && mv -f "$dir/steamwebhelper.exe" "$dir/steamwebhelper_real.exe"
+    cp -f "$w" "$dir/steamwebhelper.exe" && log "Steam window fix: web helper stand-in in place"
+  fi
+  # Chromium's single-instance locks left by a Steam that was stopped hard make the
+  # next one start without a window
+  for u in "$STEAM_PREFIX/drive_c/users/"*/AppData/Local/Steam/htmlcache; do
+    rm -f "$u/SingletonLock" "$u/SingletonCookie" "$u/SingletonSocket" "$u/lockfile" 2>/dev/null
+  done
+}
+
 # Start the Steam client in a mode (ui | game:<renderer>) with arguments, detached
 # from this window: it outlives the launcher.
 steam_start() {
   local mode="$1"; shift
   use_steam_prefix
   stop_server
+  steam_fix_webhelper
+  # keep Steam from restoring its own web helper over the stand-in on every start
+  [ -f "$STEAM_ROOT/bin/cef/cef.win64/steamwebhelper_real.exe" ] && set -- -noverifyfiles "$@"
   case "$mode" in
     ui)
       wine_env launcher
@@ -1597,6 +1633,7 @@ cmd_steam_status() {
   echo "mac_steam=$(mac_steam_running && echo 1 || echo 0)"
   echo "game_running=$(steam_game_running && echo 1 || echo 0)"
   echo "overlay=$(conf_get steam_overlay 0)"
+  echo "gpu_window=$(conf_get steam_gpu_window 0)"
 }
 
 cmd_steam_games() { # [all] -> appid|name|state|percent   (state: ready, downloading, notinstalled)
@@ -2039,7 +2076,7 @@ cmd_set() { # key value
     launch)   case "$v" in direct|bootstrap) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     args)     ;;
     display)  case "$v" in game|windowed|fullscreen|exclusive) ;; *) echo "error|bad value"; return 0 ;; esac ;;
-    steam_overlay) case "$v" in 0|1) ;; *) echo "error|bad value"; return 0 ;; esac ;;
+    steam_overlay|steam_gpu_window) case "$v" in 0|1) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     *) echo "error|unknown setting"; return 0 ;;
   esac
   conf_set "$k" "$v"

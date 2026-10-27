@@ -107,6 +107,7 @@ jobs:
           cp app/core.sh app/ui.applescript app/launcher.sh app/AppIcon.icns pkg/app/
           tar -C pkg -czf app.tar.gz app
           shasum -a 256 app.tar.gz | tee app.tar.gz.sha256
+          cp app/steam/steamwebhelper-wrapper.exe . && shasum -a 256 steamwebhelper-wrapper.exe | tee steamwebhelper-wrapper.exe.sha256
           A="pkg/Dungeons for Mac.app/Contents"
           mkdir -p "$A/MacOS" "$A/Resources"
           cp app/Info.plist "$A/"
@@ -125,4 +126,5 @@ jobs:
           gh release create app-latest -R "${{ github.repository }}" --prerelease \
             --title "App (build $(sed -n 's/^DFM_BUILD=\([0-9]*\).*/\1/p' app/core.sh), ${GITHUB_SHA::7})" \
             --notes "The app updates itself from here. Fresh install: download Dungeons-for-Mac.zip, unzip, move to Applications, right-click > Open the first time." \
-            app.tar.gz app.tar.gz.sha256 Dungeons-for-Mac.zip dfm-curl.tar.gz dfm-curl.tar.gz.sha256
+            app.tar.gz app.tar.gz.sha256 Dungeons-for-Mac.zip dfm-curl.tar.gz dfm-curl.tar.gz.sha256 \
+            steamwebhelper-wrapper.exe steamwebhelper-wrapper.exe.sha256

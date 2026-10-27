@@ -672,12 +672,21 @@ end steamRendererLabel
 
 on steamOptions()
 	set steamRaw to my core("steam-status")
-	set opts to {"Restart Steam (if its window won't open)", "Steam overlay in games: " & my onOff(my valueFor(steamRaw, "overlay")), "Close Steam now", "Open Steam's download page"}
+	set winMode to "Software (works here)"
+	if (my valueFor(steamRaw, "gpu_window")) is "1" then set winMode to "GPU (Steam's default)"
+	set opts to {"Restart Steam (if its window won't open)", "Steam window drawing: " & winMode, "Steam overlay in games: " & my onOff(my valueFor(steamRaw, "overlay")), "Close Steam now", "Open Steam's download page"}
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Steam options:" OK button name "Select" cancel button name "Back"
 	if pick is false then return
 	set pick to item 1 of pick
 	if pick starts with "Restart Steam" then
 		my dlg(my afterBar(my core("steam-restart")), {"OK"}, "OK")
+	else if pick starts with "Steam window drawing" then
+		if (my valueFor(steamRaw, "gpu_window")) is "1" then
+			my core("set steam_gpu_window 0")
+		else
+			set b to my dlg("Steam's window normally draws on the GPU in a separate process. Under Wine on this Mac that process crashes and leaves Steam's window black, so the app draws it in software instead: a little slower to scroll, but it works, and it uses less memory while you play." & return & return & "Switch to the GPU only to test it. It takes effect when Steam restarts.", {"Back", "Use GPU"}, "Back")
+			if b is "Use GPU" then my core("set steam_gpu_window 1")
+		end if
 	else if pick starts with "Steam overlay" then
 		if (my valueFor(steamRaw, "overlay")) is "1" then
 			my core("set steam_overlay 0")
