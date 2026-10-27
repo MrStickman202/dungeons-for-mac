@@ -58,6 +58,19 @@ jobs:
           M="$DFM_HOME/prefix/drive_c/users/runner/AppData/Roaming/Minecraft Bedrock/Users/Shared/games/com.mojang"
           test -f "$M/behavior_packs/Test BP/manifest.json" && test -f "$M/resource_packs/Test RP/manifest.json"
           ls "$M/minecraftWorlds"/*/level.dat
+          # Steam: library from a stand-in Steam folder, names from the Steam store
+          R="$DFM_HOME/steam-prefix/drive_c/Program Files (x86)/Steam"
+          mkdir -p "$R/steamapps" "$R/appcache/librarycache/815370" "$R/appcache/librarycache/220" "$R/appcache/librarycache/400"
+          printf '"AppState"\n{\n\t"appid"\t\t"815370"\n\t"name"\t\t"Green Hell"\n\t"StateFlags"\t\t"4"\n\t"installdir"\t\t"Green Hell"\n}\n' > "$R/steamapps/appmanifest_815370.acf"
+          printf '"AppState"\n{\n\t"appid"\t\t"400"\n\t"name"\t\t"Portal"\n\t"StateFlags"\t\t"1026"\n\t"BytesToDownload"\t\t"1000"\n\t"BytesDownloaded"\t\t"250"\n}\n' > "$R/steamapps/appmanifest_400.acf"
+          /bin/bash app/core.sh steam-games | tee sg.txt
+          grep -qx '815370|Green Hell|ready|' sg.txt
+          grep -qx '400|Portal|downloading|25' sg.txt
+          grep -q '^220|Half-Life 2|notinstalled|' sg.txt || { echo "note: store name lookup for 220:"; cat "$DFM_HOME/state/steam-names.txt"; exit 1; }
+          /bin/bash app/core.sh steam-status
+          /bin/bash app/core.sh steam-renderer 815370 d3dmetal | grep -q '^ok'
+          test "$(/bin/bash app/core.sh steam-renderer-get 815370)" = d3dmetal
+          /bin/bash app/core.sh power-check
           # the wine shim under macOS's bash 3.2, with a stand-in wine
           printf '#!/bin/bash\nfor a in "$@"; do echo "[$a]"; done\n' > "$RUNNER_TEMP/fakewine"; chmod +x "$RUNNER_TEMP/fakewine"
           /bin/bash app/core.sh set display fullscreen >/dev/null

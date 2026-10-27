@@ -24,6 +24,10 @@ jobs:
           case "$1" in
             status) printf 'engine=1\ngame=1\nrunning=0\nbusy=0\nlauncher=0\nsigned_in=1\nmode=store\nrenderer=dxmt\nfps=60\nsharp=0\nhud=0\nmetalfx=0\nd3dmetal_license=0\nsync=msync\nlaunch=direct\nargs=\n' ;;
             games)  printf 'dungeons|Minecraft Dungeons|ready\nbedrock|Minecraft Bedrock (experimental)|notdownloaded\n' ;;
+            steam-status) printf 'installed=1\nready=1\nsigned_in=1\nmode=off\nmac_steam=0\ngame_running=0\noverlay=0\n' ;;
+            steam-games)  printf '815370|Green Hell|ready|\n1172470|Apex Legends|downloading|42\n220|Half-Life 2|notinstalled|\n' ;;
+            steam-renderer-get) echo dxmt ;;
+            power-check) echo ok ;;
             *)      echo "ok|" ;;
           esac
           EOF
@@ -41,17 +45,11 @@ jobs:
           click() { osascript -e "tell application \"System Events\" to tell (first application process whose frontmost is true) to click button \"$1\" of window 1" || echo "click $1 failed"; }
           key() { osascript -e "tell application \"System Events\" to key code $1" || echo "key $1 failed"; }
           open "$APP"
-          shot 1-games
-          key 36            # Return = Open (Minecraft Dungeons)
-          shot 2-dungeons
-          click Back
-          sleep 2
-          key 125; key 36   # Down, Return = Minecraft Bedrock
-          shot 3-bedrock
-          click Back
-          sleep 2
-          key 125; key 125; key 125; key 36   # Settings...
-          shot 4-settings
+          shot 0-choose
+          click Steam
+          shot 5-steam
+          key 36            # Return = Open (Green Hell)
+          shot 6-green-hell
           ls -la shots
       - name: push to the screenshots branch
         run: |

@@ -2,6 +2,8 @@
 -- Compiled into an applet with osacompile the first time the app opens.
 -- Kept to plain ASCII on purpose. All the real work happens in core.sh.
 
+property currentStore : ""
+
 
 on run
 	try
@@ -210,6 +212,18 @@ on mainLoop()
 				set res to my runJob("setup", "Setting up Dungeons for Mac")
 				my reportResult(res, "Setup finished.")
 			end if
+		else if currentStore is "" then
+			set b to my dlg("Which games do you want to play?" & return & return & "Microsoft Store: Xbox PC games your Microsoft account owns, like Minecraft Dungeons and Minecraft Bedrock." & return & return & "Steam: your Steam library, through the Windows version of Steam running inside this app.", {"Quit", "Steam", "Microsoft Store"}, "Microsoft Store")
+			if b is "Quit" then return
+			if b is "Steam" then
+				set currentStore to "steam"
+			else
+				set currentStore to "microsoft"
+			end if
+		else if currentStore is "steam" then
+			set r to my steamMenu()
+			if r is "quit" then return
+			if r is "switch" then set currentStore to "microsoft"
 		else if (my valueFor(statusRaw, "signed_in")) is not "1" and (my valueFor(statusRaw, "game")) is not "1" then
 			set b to my dlg(my signInText(), {"Quit", "More...", "Sign In"}, "Sign In")
 			if b is "Quit" then return
@@ -220,7 +234,9 @@ on mainLoop()
 				my reportResult(res, "Signed in.")
 			end if
 		else
-			if (my gamesMenu()) is "quit" then return
+			set r to my gamesMenu()
+			if r is "quit" then return
+			if r is "switch" then set currentStore to "steam"
 		end if
 	end repeat
 end mainLoop
@@ -253,9 +269,11 @@ on gamesMenu()
 	set end of opts to "Add a game by Store ID..."
 	set end of opts to "Settings..."
 	set end of opts to "More..."
-	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Your games:" default items {item 1 of opts} OK button name "Open" cancel button name "Quit"
+	set end of opts to "Switch to Steam..."
+	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Your Microsoft Store games:" default items {item 1 of opts} OK button name "Open" cancel button name "Quit"
 	if pick is false then return "quit"
 	set pick to item 1 of pick
+	if pick is "Switch to Steam..." then return "switch"
 	if pick is "Find games you own..." then
 		my findGames()
 		return "back"
@@ -308,7 +326,16 @@ on bedrockNote()
 	return "Minecraft Bedrock is experimental here. It uses DirectX 12, which runs on Apple's D3DMetal from the Game Porting Toolkit. The first launch asks you to accept Apple's licence for it."
 end bedrockNote
 
+on powerOK()
+	if (my core("power-check")) is "lowpower" then
+		set b to my dlg("Low Power Mode is on. It holds the chip back and can cut a game's frame rate a lot." & return & return & "Turn it off in System Settings > Battery > Low Power Mode, or in Control Center, then press Play.", {"Cancel", "Play Anyway"}, "Cancel")
+		return (b is "Play Anyway")
+	end if
+	return true
+end powerOK
+
 on startStoreGame(gameId, gameName)
+	if not (my powerOK()) then return false
 	set r to my core("play " & quoted form of gameId)
 	if r starts with "licence" then
 		if not (my acceptD3DMetal()) then return false
@@ -484,6 +511,159 @@ on addStoreGameSteps()
 		my dlg(my afterBar(r), {"OK"}, "OK")
 	end if
 end addStoreGameSteps
+
+-- ---------------------------------------------------------------------------
+-- Steam
+-- ---------------------------------------------------------------------------
+on steamSetupText()
+	return "Steam runs here as its Windows version, inside its own Windows environment in this app. Steam signs you in, downloads and updates your games, and the games keep achievements, cloud saves and multiplayer." & return & return & "Setting it up downloads Steam from Valve, then Steam's first start downloads and unpacks its own client. That first start is slow under Rosetta: usually 15 to 25 minutes that can look frozen. After that, Steam starts in a minute or two." & return & return & "Quit the Mac version of Steam first if it's open: two Steam clients signed in to one account log each other out."
+end steamSetupText
+
+on steamStateLabel(steamRaw, pct)
+	if steamRaw is "ready" then return "Ready to play"
+	if steamRaw is "downloading" then
+		if pct is "" then return "Downloading in Steam"
+		return "Downloading " & pct & "%"
+	end if
+	return "Not installed"
+end steamStateLabel
+
+on steamMenu()
+	set steamRaw to my core("steam-status")
+	if (my valueFor(steamRaw, "ready")) is not "1" then
+		set b to my dlg(my steamSetupText(), {"Back", "Set Up Steam"}, "Set Up Steam")
+		if b is "Back" then return "switch"
+		set res to my runJob("steamsetup", "Setting up Steam")
+		my reportResult(res, "Steam is set up.")
+		return "back"
+	end if
+	if (my valueFor(steamRaw, "signed_in")) is not "1" then
+		set b to my dlg("Sign in to Steam to see your games." & return & return & "The Steam window opens: sign in with your password or scan the QR code with the Steam app on your phone. Then come back here.", {"Back", "Open Steam"}, "Open Steam")
+		if b is "Back" then return "switch"
+		my dlg(my afterBar(my core("steam-open")), {"OK"}, "OK")
+		return "back"
+	end if
+	display notification "Reading your Steam library..." with title "Dungeons for Mac"
+	set rawGames to my core("steam-games")
+	set ids to {}
+	set names to {}
+	set states to {}
+	set opts to {}
+	repeat with ln in (paragraphs of rawGames)
+		set parts to my splitBar(ln as text)
+		if (count of parts) >= 3 then
+			set pct to ""
+			if (count of parts) >= 4 then set pct to item 4 of parts
+			set end of ids to item 1 of parts
+			set end of names to item 2 of parts
+			set end of states to item 3 of parts
+			set end of opts to (item 2 of parts) & "  -  " & my steamStateLabel(item 3 of parts, pct)
+		end if
+	end repeat
+	set gameCount to count of opts
+	set end of opts to "Open Steam (store, downloads, friends)..."
+	set end of opts to "Refresh the list"
+	set end of opts to "Settings..."
+	set end of opts to "Steam options..."
+	set end of opts to "More..."
+	set end of opts to "Switch to Microsoft Store..."
+	set promptText to "Your Steam games:"
+	if gameCount is 0 then set promptText to "No games yet. Steam fills this list after you sign in and its library loads; choose Open Steam, wait for your library, then Refresh."
+	set pick to choose from list opts with title "Dungeons for Mac" with prompt promptText default items {item 1 of opts} OK button name "Open" cancel button name "Quit"
+	if pick is false then return "quit"
+	set pick to item 1 of pick
+	if pick is "Switch to Microsoft Store..." then return "switch"
+	if pick starts with "Open Steam" then
+		my dlg(my afterBar(my core("steam-open")), {"OK"}, "OK")
+		return "back"
+	else if pick is "Refresh the list" then
+		return "back"
+	else if pick is "Settings..." then
+		my settingsMenu()
+		return "back"
+	else if pick is "Steam options..." then
+		my steamOptions()
+		return "back"
+	else if pick is "More..." then
+		return my moreMenu()
+	end if
+	repeat with i from 1 to gameCount
+		if (item i of opts) is pick then return my steamGameMenu(item i of ids, item i of names, item i of states)
+	end repeat
+	return "back"
+end steamMenu
+
+on steamGameMenu(appId, gameName, gameState)
+	if gameState is "notinstalled" then
+		set b to my dlg(gameName & return & return & "Not installed yet. Steam's install window opens: pick Install there, and the download runs in Steam (you'll see its progress in this list too).", {"Back", "Install"}, "Install")
+		if b is "Install" then my dlg(my afterBar(my core("steam-install " & appId)), {"OK"}, "OK")
+		return "back"
+	end if
+	if gameState is "downloading" then
+		set b to my dlg(gameName & return & return & "Steam is still downloading it. Open Steam to see the download, pause it or change its order.", {"Back", "Open Steam"}, "Open Steam")
+		if b is "Open Steam" then my dlg(my afterBar(my core("steam-open steam://open/downloads")), {"OK"}, "OK")
+		return "back"
+	end if
+	set b to my dlg(gameName & return & return & "Ready to play." & return & return & "Graphics: " & my steamRendererLabel(appId) & ". Steam starts without its window while you play, so the game gets the speed." & return & return & "For more FPS: set a lower resolution in the game's own video settings and turn on Resolution upscaling (MetalFX) in Settings.", {"Back", "More...", "Play"}, "Play")
+	if b is "Play" then
+		if not (my powerOK()) then return "back"
+		set r to my core("steam-play " & appId)
+		if r starts with "licence" then
+			if not (my acceptD3DMetal()) then return "back"
+			set r to my core("steam-play " & appId)
+		end if
+		if r starts with "ok" then
+			display notification "Starting " & gameName & ". With Steam starting in the background, it can take a couple of minutes." with title "Dungeons for Mac"
+			return "quit"
+		end if
+		my dlg(my afterBar(r), {"OK"}, "OK")
+	else if b is "More..." then
+		set pick to choose from list {"Graphics...", "Open in Steam", "Uninstall..."} with title "Dungeons for Mac" with prompt gameName & ":" OK button name "Select" cancel button name "Back"
+		if pick is false then return "back"
+		set pick to item 1 of pick
+		if pick is "Graphics..." then
+			set g to choose from list {"DXMT - DirectX 11 (fastest, most games; Green Hell uses this)", "D3DMetal - DirectX 12 and 11 (for DirectX 12 games)"} with title "Dungeons for Mac" with prompt "Graphics for " & gameName & ":" OK button name "Use This" cancel button name "Back"
+			if g is not false then
+				if (item 1 of g) starts with "D3DMetal" then
+					my core("steam-renderer " & appId & " d3dmetal")
+				else
+					my core("steam-renderer " & appId & " dxmt")
+				end if
+			end if
+		else if pick is "Open in Steam" then
+			my dlg(my afterBar(my core("steam-open steam://nav/games/details/" & appId)), {"OK"}, "OK")
+		else if pick starts with "Uninstall" then
+			my dlg(my afterBar(my core("steam-uninstall " & appId)), {"OK"}, "OK")
+		end if
+	end if
+	return "back"
+end steamGameMenu
+
+on steamRendererLabel(appId)
+	set r to do shell script "/bin/bash " & quoted form of (my corePath()) & " steam-renderer-get " & appId
+	if r is "d3dmetal" then return "D3DMetal (DirectX 12)"
+	return "DXMT (DirectX 11)"
+end steamRendererLabel
+
+on steamOptions()
+	set steamRaw to my core("steam-status")
+	set opts to {"Steam overlay in games: " & my onOff(my valueFor(steamRaw, "overlay")), "Close Steam now", "Open Steam's download page"}
+	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Steam options:" OK button name "Select" cancel button name "Back"
+	if pick is false then return
+	set pick to item 1 of pick
+	if pick starts with "Steam overlay" then
+		if (my valueFor(steamRaw, "overlay")) is "1" then
+			my core("set steam_overlay 0")
+		else
+			set b to my dlg("The Steam overlay (Shift+Tab in a game) hooks every frame. Under Wine it costs speed and makes some games crash, so it's off here unless you turn it on.", {"Back", "Turn On"}, "Back")
+			if b is "Turn On" then my core("set steam_overlay 1")
+		end if
+	else if pick is "Close Steam now" then
+		my dlg(my afterBar(my core("steam-quit")), {"OK"}, "OK")
+	else
+		my dlg(my afterBar(my core("steam-open steam://open/downloads")), {"OK"}, "OK")
+	end if
+end steamOptions
 
 on welcomeText()
 	return "Welcome! This sets up everything your Microsoft Store Xbox games (Minecraft Dungeons, Minecraft Bedrock) need on this Mac:" & return & return & "- Wine 11 (built from CrossOver 26.3's code) with the Xbox game runtime" & return & "- DXMT, which turns the game's Direct3D 11 into Apple Metal" & return & "- the Microsoft sign-in and download client" & return & "- Microsoft's Visual C++ runtimes" & return & return & "It downloads about 800 MB and takes 5 to 15 minutes. Everything lives in one folder that Uninstall removes completely."

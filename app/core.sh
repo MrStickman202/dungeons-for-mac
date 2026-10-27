@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=15   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=16   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1358,6 +1358,335 @@ cmd_stop() {
 }
 
 # ---------------------------------------------------------------------------
+# Steam
+# ---------------------------------------------------------------------------
+# The Windows Steam client runs inside its own Windows environment (a second
+# prefix), the way CrossOver and Highball do it: Steam signs in, downloads and
+# updates games itself, and games keep their Steam features (Steamworks,
+# achievements, cloud saves). Two ways of running it:
+#   ui    Steam's window, for signing in, the store and downloads. Its web views
+#         (CEF) hang under msync, so this mode runs with sync off and DXMT.
+#   game  "steam -silent -applaunch <id>": no Steam window, msync on (much faster
+#         in games) and the game's own graphics stack. Steam's window can't be
+#         shown in this mode, so opening it restarts Steam when no game runs.
+# Wine fixes the sync mode when the environment's wineserver starts, which is
+# why switching modes means restarting Steam.
+STEAM_PREFIX="$AS/steam-prefix"
+STEAM_ROOT="$STEAM_PREFIX/drive_c/Program Files (x86)/Steam"
+STEAM_EXE="$STEAM_ROOT/steam.exe"
+STEAM_SETUP_URL="https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe"
+STEAM_MODE_FILE="$STATE/steam-mode"
+STEAM_NAMES="$STATE/steam-names.txt"
+
+use_steam_prefix() { # the helpers (wine_env, stop_server, make_prefix...) follow $PREFIX
+  PREFIX="$STEAM_PREFIX"
+  PREFIX_MARK="$STEAM_PREFIX/.dfm-prefix-ok"
+  PADS_MARK="$STEAM_PREFIX/.dfm-pads-1"
+}
+
+steam_installed() { [ -f "$STEAM_EXE" ] && [ "$(head -c 2 "$STEAM_EXE" 2>/dev/null)" = MZ ]; }
+steam_bootstrapped() { [ -d "$STEAM_ROOT/bin/cef" ]; }
+steam_signed_in() { grep -q '"AccountName"' "$STEAM_ROOT/config/loginusers.vdf" 2>/dev/null; }
+steam_running() { pgrep -if 'steam[\\/]steam\.exe' >/dev/null 2>&1 || pgrep -if 'Steam/steam\.exe' >/dev/null 2>&1; }
+mac_steam_running() { pgrep -x steam_osx >/dev/null 2>&1; }
+steam_mode() { if steam_running; then cat "$STEAM_MODE_FILE" 2>/dev/null || echo ui; else echo off; fi; }
+
+acf_value() { # file key -> value of a top-level "key" "value" line in a Steam .acf/.vdf
+  sed -n "s/^[[:space:]]*\"$2\"[[:space:]]*\"\\(.*\\)\"[[:space:]]*\$/\\1/p" "$1" 2>/dev/null | head -n 1
+}
+
+steam_game_running() { # a game started from Steam's library, or any other Windows program that isn't Steam's own
+  local f dir
+  for f in "$STEAM_ROOT"/steamapps/appmanifest_*.acf; do
+    [ -f "$f" ] || continue
+    dir=$(acf_value "$f" installdir)
+    [ -n "$dir" ] || continue
+    pgrep -if "common[\\/]$dir[\\/]" >/dev/null 2>&1 && return 0
+  done
+  # careful fallback: a Windows program running that isn't part of Steam or of Wine itself
+  ps -axo command 2>/dev/null | grep -i '\.exe' | grep -v grep \
+    | grep -viE 'steam\.exe|steamwebhelper|steamservice|steamerrorreporter|gldriverquery|vulkandriverquery|services\.exe|winedevice|plugplay|svchost|explorer\.exe|rpcss|conhost|start\.exe|wineboot|rundll32|tabtip|winemenubuilder|xodus' \
+    | grep -q . && return 0
+  return 1
+}
+
+game_display_args() { # install folder -> display switches in that engine's own words
+  local dir="$1"
+  if [ -f "$dir/UnityPlayer.dll" ] || ls "$dir"/*_Data/globalgamemanagers >/dev/null 2>&1; then
+    # Unity reads "-switch value" pairs
+    case "$(conf_get display game)" in
+      windowed)   echo "-screen-fullscreen 0 -window-mode windowed" ;;
+      fullscreen) echo "-screen-fullscreen 1 -window-mode borderless" ;;
+      exclusive)  echo "-screen-fullscreen 1 -window-mode exclusive" ;;
+    esac
+  else
+    display_args
+  fi
+}
+
+# Start the Steam client in a mode (ui | game:<renderer>) with arguments, detached
+# from this window: it outlives the launcher.
+steam_start() {
+  local mode="$1"; shift
+  use_steam_prefix
+  stop_server
+  case "$mode" in
+    ui)
+      wine_env launcher
+      ;;
+    game:*)
+      GAME_RENDERER_FOR_LAUNCH="${mode#game:}"
+      wine_env game
+      # The Steam overlay hooks every frame, and under Wine it costs speed and
+      # crashes some games: off unless the person turned it on.
+      if [ "$(conf_get steam_overlay 0)" != 1 ]; then
+        export WINEDLLOVERRIDES="$WINEDLLOVERRIDES;gameoverlayrenderer,gameoverlayrenderer64=d"
+      fi
+      ;;
+  esac
+  echo "$mode" > "$STEAM_MODE_FILE"
+  local out="${STEAM_LOG:-$LOGS/steam.log}"
+  echo "== $(date '+%F %T') Steam ($mode): $*" >> "$out"
+  (
+    trap '' HUP TERM
+    set -m
+    cd "$STEAM_ROOT" || exit 1
+    "$WINE" "$STEAM_EXE" "$@" &
+    wait $!
+    echo "== $(date '+%F %T') Steam exited ($?)"
+  ) >> "$out" 2>&1 < /dev/null &
+}
+
+# Hand a command line to the running client: a second steam.exe forwards it over
+# Steam's own channel and exits. It runs with the client's own sync mode.
+steam_forward() {
+  local mode pid i=0
+  mode=$(cat "$STEAM_MODE_FILE" 2>/dev/null || echo ui)
+  use_steam_prefix
+  case "$mode" in
+    game:*) GAME_RENDERER_FOR_LAUNCH="${mode#game:}"; wine_env game ;;
+    *)      wine_env launcher ;;
+  esac
+  echo "== $(date '+%F %T') forward to Steam: $*" >> "$LOGS/steam.log"
+  ( cd "$STEAM_ROOT" && exec "$WINE" "$STEAM_EXE" "$@" ) >> "$LOGS/steam.log" 2>&1 < /dev/null &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+  kill "$pid" 2>/dev/null
+  return 0
+}
+
+steam_shutdown() { # ask Steam to quit, then end the environment
+  use_steam_prefix
+  if steam_running; then
+    steam_forward -shutdown
+    local i=0
+    while steam_running && [ $i -lt 25 ]; do sleep 1; i=$((i + 1)); done
+  fi
+  wait_server 15 || stop_server
+  rm -f "$STEAM_MODE_FILE"
+}
+
+job_steamsetup() {
+  [ -f "$READY_MARK" ] || { fail "Set up Dungeons for Mac first."; return 1; }
+  if mac_steam_running; then
+    fail "Quit the Mac version of Steam first (Steam > Quit Steam). Two Steam clients signed in to the same account log each other out."
+    return 1
+  fi
+  local gb; gb=$(free_gb "$AS")
+  [ "${gb:-0}" -ge 5 ] || { fail "Steam needs at least 5 GB free to set up (this Mac has ${gb:-0} GB), plus room for your games."; return 1; }
+  use_steam_prefix
+  progress 2 "Preparing a Windows environment for Steam..."
+  make_prefix || return 1
+  apply_controller_settings
+  if ! steam_installed; then
+    download "$STEAM_SETUP_URL" "$DL/SteamSetup.exe" "" 0 "Downloading Steam's installer from Valve" 10 20 || return 1
+    if [ "$(head -c 2 "$DL/SteamSetup.exe" 2>/dev/null)" != MZ ]; then
+      rm -f "$DL/SteamSetup.exe"; fail "Valve's download didn't look like Steam's installer. Try again later."; return 1
+    fi
+    stop_server
+    wine_env launcher
+    cp -f "$DL/SteamSetup.exe" "$STEAM_PREFIX/drive_c/dfm-SteamSetup.exe"
+    run_ticker 22 "Installing Steam" "$WINE" 'C:\dfm-SteamSetup.exe' /S
+    wait_server 60 || stop_server
+    rm -f "$STEAM_PREFIX/drive_c/dfm-SteamSetup.exe"
+    steam_installed || { fail "Steam's installer didn't finish. Choose Set Up Steam again."; return 1; }
+    log "Steam installed"
+  fi
+  # The first start downloads and unpacks the whole client (about 250 MB) under
+  # its 32-bit bootstrapper, which is slow under Rosetta: 15-25 minutes that look
+  # frozen. Waiting here shows the time; it resumes if it stops.
+  if ! steam_bootstrapped || ! steam_running; then
+    steam_running || steam_start ui
+  fi
+  local t=0
+  while [ $t -lt 2700 ]; do
+    if steam_bootstrapped && pgrep -if 'steamwebhelper' >/dev/null 2>&1; then break; fi
+    if ! steam_running && [ $t -gt 60 ]; then
+      log "Steam's first start stopped at $(fmt_time $t); starting it again (it resumes)"
+      steam_start ui
+    fi
+    progress -1 "Steam is downloading and unpacking its client - $(fmt_time $t) (usually 15-25 minutes, quiet stretches are normal)"
+    sleep 5; t=$((t + 5))
+  done
+  steam_bootstrapped || { fail "Steam's first start didn't finish in 45 minutes. Choose Set Up Steam again; it continues where it stopped."; return 1; }
+  progress 100 "Done"
+  okmsg "Steam is set up. Sign in in the Steam window (password or QR code with the Steam app). If it shows NO CONNECTION, quit the Mac version of Steam."
+  return 0
+}
+
+# --- names of owned games: the client keeps one artwork folder per owned app in
+# appcache/librarycache; the Store's public app details give its name and type.
+steam_names_js() {
+  cat > "$STATE/steamapp.js" <<'JS'
+ObjC.import('Foundation');
+function run(argv) {
+  var out = [];
+  for (var k = 0; k < argv.length; k++) {
+    var s = $.NSString.stringWithContentsOfFileEncodingError(argv[k], $.NSUTF8StringEncoding, null);
+    if (s.isNil()) continue;
+    var j; try { j = JSON.parse(s.js); } catch (e) { continue; }
+    for (var id in j) {
+      var e = j[id] || {}, d = e.data || {};
+      var name = String(d.name || '').replace(/[|\r\n]+/g, ' ');
+      out.push(id + '|' + (e.success ? String(d.type || 'unknown') : 'gone') + '|' + name);
+    }
+  }
+  return out.join('\n');
+}
+JS
+}
+
+steam_fetch_names() { # appids on stdin -> appended to $STEAM_NAMES (6 at a time, at most 80 per call)
+  local ids id n=0 files=() f
+  ids=$(grep -E '^[0-9]+$' | head -n 80)
+  [ -n "$ids" ] || return 0
+  steam_names_js
+  for id in $ids; do
+    f="$STATE/appdetails-$$-$id.json"
+    /usr/bin/curl -fsS --max-time 15 -o "$f" "https://store.steampowered.com/api/appdetails?appids=$id&filters=basic&l=english" 2>/dev/null &
+    files[${#files[@]}]="$f"
+    n=$((n + 1)); [ $((n % 6)) -eq 0 ] && wait
+  done
+  wait
+  for f in "${files[@]}"; do [ -s "$f" ] || rm -f "$f"; done
+  local have=()
+  for f in "${files[@]}"; do [ -f "$f" ] && have[${#have[@]}]="$f"; done
+  if [ ${#have[@]} -gt 0 ]; then
+    /usr/bin/osascript -l JavaScript "$STATE/steamapp.js" "${have[@]}" 2>/dev/null | tr '\r' '\n' | grep '|' >> "$STEAM_NAMES"
+    rm -f "${have[@]}"
+  fi
+}
+
+cmd_steam_status() {
+  echo "installed=$(steam_installed && echo 1 || echo 0)"
+  echo "ready=$(steam_bootstrapped && echo 1 || echo 0)"
+  echo "signed_in=$(steam_signed_in && echo 1 || echo 0)"
+  echo "mode=$(steam_mode)"
+  echo "mac_steam=$(mac_steam_running && echo 1 || echo 0)"
+  echo "game_running=$(steam_game_running && echo 1 || echo 0)"
+  echo "overlay=$(conf_get steam_overlay 0)"
+}
+
+cmd_steam_games() { # [refresh] -> appid|name|state|percent   (state: ready, downloading, notinstalled)
+  local f id name flags got total pct owned installed missing
+  : > "$STATE/steam-rows.txt"
+  installed=""
+  for f in "$STEAM_ROOT"/steamapps/appmanifest_*.acf; do
+    [ -f "$f" ] || continue
+    id=$(acf_value "$f" appid); name=$(acf_value "$f" name | tr -d '|')
+    [ -n "$id" ] || continue
+    flags=$(acf_value "$f" StateFlags); got=$(acf_value "$f" BytesDownloaded); total=$(acf_value "$f" BytesToDownload)
+    case "$id" in 228980) continue ;; esac   # Steamworks Common Redistributables
+    pct=""
+    if [ "$flags" = 4 ]; then
+      printf '%s|%s|ready|\n' "$id" "$name" >> "$STATE/steam-rows.txt"
+    else
+      if [ -n "$total" ] && [ "${total:-0}" -gt 0 ] 2>/dev/null; then pct=$(( ${got:-0} * 100 / total )); fi
+      printf '%s|%s|downloading|%s\n' "$id" "$name" "$pct" >> "$STATE/steam-rows.txt"
+    fi
+    installed="$installed $id "
+  done
+  owned=$(ls "$STEAM_ROOT/appcache/librarycache" 2>/dev/null | grep -E '^[0-9]+$')
+  touch "$STEAM_NAMES"
+  missing=$(for id in $owned; do grep -q "^$id|" "$STEAM_NAMES" || echo "$id"; done)
+  [ -n "$missing" ] && printf '%s\n' "$missing" | steam_fetch_names
+  for id in $owned; do
+    case "$installed" in *" $id "*) continue ;; esac
+    f=$(grep "^$id|" "$STEAM_NAMES" | tail -n 1)
+    [ "$(printf '%s' "$f" | cut -d'|' -f2)" = game ] || continue
+    printf '%s|%s|notinstalled|\n' "$id" "$(printf '%s' "$f" | cut -d'|' -f3-)" >> "$STATE/steam-rows.txt"
+  done
+  # installed and downloading first, then the rest; each by name
+  { grep '|ready|' "$STATE/steam-rows.txt"; grep '|downloading|' "$STATE/steam-rows.txt"; } | sort -t'|' -k2,2f
+  grep '|notinstalled|' "$STATE/steam-rows.txt" | sort -t'|' -k2,2f
+}
+
+cmd_steam_open() { # [steam:// url]  show Steam's window (sign in, store, downloads)
+  steam_installed || { echo "error|Set up Steam first."; return 0; }
+  if mac_steam_running; then echo "error|Quit the Mac version of Steam first (Steam > Quit Steam), then try again. Two Steam clients on one account log each other out."; return 0; fi
+  local url="${1:-steam://open/main}"
+  case "$(steam_mode)" in
+    ui)  steam_forward "$url"; echo "ok|Steam's window is open." ;;
+    off) steam_start ui "$url"; echo "ok|Opening Steam. A cold start takes a minute or two." ;;
+    *)
+      if steam_game_running; then
+        echo "error|A game is running. Steam's window can open once you quit it (it runs without its window while you play, so the game gets the speed)."
+      else
+        steam_shutdown; steam_start ui "$url"; echo "ok|Opening Steam. A cold start takes a minute or two."
+      fi ;;
+  esac
+}
+
+cmd_steam_install() { cmd_steam_open "steam://install/$1"; }
+cmd_steam_uninstall() { cmd_steam_open "steam://uninstall/$1"; }
+
+steam_renderer() { conf_get "steam_r_$1" dxmt; }
+
+cmd_steam_renderer() { # appid dxmt|d3dmetal
+  case "$2" in dxmt|d3dmetal) conf_set "steam_r_$1" "$2"; echo "ok|$2" ;; *) echo "error|unknown graphics option" ;; esac
+}
+
+cmd_steam_play() { # appid
+  local id="$1" r mode f name glog args
+  steam_installed || { echo "error|Set up Steam first."; return 0; }
+  f="$STEAM_ROOT/steamapps/appmanifest_$id.acf"
+  [ -f "$f" ] && [ "$(acf_value "$f" StateFlags)" = 4 ] || { echo "error|That game isn't fully installed yet. Its download runs in Steam."; return 0; }
+  if mac_steam_running; then echo "error|Quit the Mac version of Steam first (Steam > Quit Steam)."; return 0; fi
+  name=$(acf_value "$f" name)
+  r=$(steam_renderer "$id")
+  if [ "$r" = d3dmetal ]; then
+    [ "$(conf_get d3dmetal_license 0)" = 1 ] || { echo "licence|$name is set to Apple's D3DMetal, which needs you to accept Apple's licence first."; return 0; }
+    [ -d "$D3DM/wine" ] || { echo "error|D3DMetal isn't installed yet. Choose Download on Minecraft Bedrock once, or set this game's Graphics to DXMT."; return 0; }
+  fi
+  mode=$(steam_mode)
+  if [ "$mode" != off ] && steam_game_running; then echo "running|A Steam game is already running."; return 0; fi
+  args="-silent -applaunch $id $(game_display_args "$STEAM_ROOT/steamapps/common/$(acf_value "$f" installdir)") $(conf_get args "")"
+  use_steam_prefix
+  rotate_logs
+  glog="$LOGS/game-$(date +%Y%m%d-%H%M%S).log"
+  printf 'Dungeons for Mac %s (build %s) - Steam: %s (%s)\nrenderer=%s fps=%s upscale=%s dlss=%s sync=%s overlay=%s steam was %s\n----\n' \
+    "$DFM_VERSION" "$DFM_BUILD" "$name" "$id" "$r" "$(conf_get fps 60)" "$(upscale_setting)" "$(conf_get metalfx 0)" \
+    "$(conf_get sync msync)" "$(conf_get steam_overlay 0)" "$mode" > "$glog"
+  if [ "$mode" = "game:$r" ]; then
+    # the client already runs the way this game wants: hand it the launch
+    # shellcheck disable=SC2086
+    steam_forward $args
+  else
+    # Steam's window (sync off) or another graphics stack: start Steam again for the game
+    [ "$mode" = off ] || steam_shutdown
+    stop_server
+    apply_dlss_settings
+    apply_display_settings
+    # shellcheck disable=SC2086
+    STEAM_LOG="$glog" steam_start "game:$r" $args
+  fi
+  log "play (steam $id): $name, $r"
+  echo "ok|Starting $name. With Steam starting in the background, the first launch can take a couple of minutes."
+}
+
+job_d3dmetal() { ensure_d3dmetal || return 1; progress 100 "Done"; okmsg "D3DMetal is installed."; }
+
+# ---------------------------------------------------------------------------
 # Saves, logs, diagnostics, uninstall
 # ---------------------------------------------------------------------------
 user_dir() {
@@ -1529,6 +1858,7 @@ cmd_diag() {
     echo; echo "== memory"; vm_stat 2>/dev/null | head -12; memory_pressure -Q 2>/dev/null | tail -2
     echo; echo "== recent crash reports"
     ls -t "$HOME/Library/Logs/DiagnosticReports" 2>/dev/null | grep -iE 'xodus|wine|Dungeons|Minecraft' | head -10
+    echo; echo "== steam"; cmd_steam_status; ls "$STEAM_ROOT/steamapps" 2>/dev/null | head -20
     echo; echo "== games"; cmd_games
     for g in $(game_ids); do
       select_game "$g" || continue
@@ -1575,7 +1905,7 @@ kill_tree() {
 cmd_start() { # job args...
   local job="$1"
   shift
-  case "$job" in setup|repair|import|mclauncher|signin|storeinstall) ;; *) echo "error|unknown job $job"; return 0 ;; esac
+  case "$job" in setup|repair|import|mclauncher|signin|storeinstall|steamsetup|d3dmetal) ;; *) echo "error|unknown job $job"; return 0 ;; esac
   mkdirs
   if job_alive; then echo "busy|Another task is running."; return 0; fi
   rm -f "$STATE/result" "$STATE/okmsg" "$STATE/errmsg"
@@ -1685,6 +2015,7 @@ cmd_set() { # key value
     launch)   case "$v" in direct|bootstrap) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     args)     ;;
     display)  case "$v" in game|windowed|fullscreen|exclusive) ;; *) echo "error|bad value"; return 0 ;; esac ;;
+    steam_overlay) case "$v" in 0|1) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     *) echo "error|unknown setting"; return 0 ;;
   esac
   conf_set "$k" "$v"
@@ -1730,6 +2061,16 @@ case "$cmd" in
   catalog)        mkdir -p "$STATE" "$LOGS"; library_js; printf '%s\n' "$@" | catalog_rows ;;
   remove-game)    cmd_remove_game "$1" ;;
   import-addons)  cmd_import_addons "$@" ;;
+  steam-status)   cmd_steam_status ;;
+  steam-games)    cmd_steam_games "$@" ;;
+  steam-open)     cmd_steam_open "$1" ;;
+  steam-install)  cmd_steam_install "$1" ;;
+  steam-uninstall) cmd_steam_uninstall "$1" ;;
+  steam-play)     cmd_steam_play "$1" ;;
+  steam-renderer) cmd_steam_renderer "$1" "$2" ;;
+  steam-renderer-get) steam_renderer "$1" ;;
+  steam-quit)     steam_shutdown; echo "ok|Steam closed." ;;
+  power-check)    if pmset -g 2>/dev/null | grep -qE 'lowpowermode[[:space:]]+1'; then echo lowpower; else echo ok; fi ;;
   delete-files)   cmd_delete_files "$1" ;;
   d3dmetal-license) cmd_d3dmetal_license ;;
   accept-d3dmetal) conf_set d3dmetal_license 1; echo "ok|accepted" ;;
