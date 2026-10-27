@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=14   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=15   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1370,6 +1370,105 @@ user_dir() {
 }
 
 saves_dir() { printf '%s' "$(user_dir)/Saved Games/Mojang Studios/Dungeons"; }
+# --- Minecraft Bedrock add-ons ------------------------------------------------
+# Windows Bedrock imports a double-clicked .mcaddon/.mcpack/.mcworld into its
+# com.mojang folder. Here the same files are unpacked into that folder in the
+# Windows layer: packs into Users/Shared (what Microsoft documents for the GDK
+# version), worlds next to the worlds the game already made.
+bedrock_root() { printf '%s' "$(user_dir)/AppData/Roaming/Minecraft Bedrock/Users"; }
+bedrock_worlds_dir() {
+  local d
+  d=$(ls -td "$(bedrock_root)"/*/games/com.mojang/minecraftWorlds 2>/dev/null | grep -v '/Shared/' | head -n 1)
+  [ -n "$d" ] || d="$(bedrock_root)/Shared/games/com.mojang/minecraftWorlds"
+  printf '%s' "$d"
+}
+
+manifest_js() {
+  cat > "$STATE/manifest.js" <<'JS'
+ObjC.import('Foundation');
+function run(argv) {
+  var s = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
+  if (s.isNil()) return 'unknown|';
+  var t = s.js.replace(/^﻿/, '').replace(/^\s*\/\/.*$/mg, '');
+  var m; try { m = JSON.parse(t); } catch (e) { return 'unknown|'; }
+  var kind = 'unknown', mods = m.modules || [];
+  for (var i = 0; i < mods.length; i++) {
+    var ty = String(mods[i].type || '');
+    if (ty === 'resources') { kind = 'resource'; break; }
+    if (ty === 'data' || ty === 'script' || ty === 'javascript' || ty === 'client_data') kind = 'behavior';
+    if (ty === 'skin_pack') kind = 'skin';
+    if (ty === 'world_template') kind = 'template';
+  }
+  var name = String(((m.header || {}).name) || '').replace(/§./g, '').replace(/[^A-Za-z0-9 _.-]+/g, '').replace(/^[ .]+|[ .]+$/g, '').slice(0, 60);
+  return kind + '|' + name;
+}
+JS
+}
+
+expand_nested() { # unpack .mcpack/.mcworld/.mctemplate/.zip found inside an .mcaddon, a few levels deep
+  local dir="$1" pass f out
+  for pass in 1 2 3; do
+    find "$dir" -type f \( -iname '*.mcpack' -o -iname '*.mcworld' -o -iname '*.mctemplate' -o -iname '*.zip' \) 2>/dev/null > "$STATE/nested.txt"
+    [ -s "$STATE/nested.txt" ] || return 0
+    while IFS= read -r f; do
+      out="${f%.*}.unpacked"
+      mkdir -p "$out" && /usr/bin/unzip -q -o "$f" -d "$out" >/dev/null 2>&1
+      rm -f "$f"
+    done < "$STATE/nested.txt"
+  done
+}
+
+cmd_import_addons() { # files... -> ok|message
+  local f tmp m dir kind name dest packs=0 worlds=0 skipped=0 n mojang worldsdir
+  [ -d "$PREFIX/drive_c" ] || { echo "error|Run setup first."; return 0; }
+  mojang="$(bedrock_root)/Shared/games/com.mojang"
+  worldsdir=$(bedrock_worlds_dir)
+  manifest_js
+  for f in "$@"; do
+    [ -f "$f" ] || { skipped=$((skipped + 1)); continue; }
+    tmp=$(mktemp -d "$AS/addon.XXXXXX") || continue
+    if ! /usr/bin/unzip -q -o "$f" -d "$tmp/x" >/dev/null 2>&1; then
+      skipped=$((skipped + 1)); rm -rf "$tmp"; continue
+    fi
+    expand_nested "$tmp/x"
+    # worlds: any folder holding level.dat
+    find "$tmp/x" -type f -name level.dat 2>/dev/null | while IFS= read -r m; do
+      dir=$(dirname "$m")
+      mkdir -p "$worldsdir"
+      dest="$worldsdir/$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12)"
+      mv "$dir" "$dest" && echo world >> "$tmp/done"
+    done
+    # packs: every remaining folder with a manifest.json
+    find "$tmp/x" -type f -name manifest.json 2>/dev/null | while IFS= read -r m; do
+      dir=$(dirname "$m")
+      [ -d "$dir" ] || continue
+      kind=$(/usr/bin/osascript -l JavaScript "$STATE/manifest.js" "$m" 2>/dev/null)
+      name=${kind#*|}; kind=${kind%%|*}
+      [ -n "$name" ] || name=$(basename "$f" | sed 's/\.[^.]*$//' | tr -cd 'A-Za-z0-9 _.-')
+      case "$kind" in
+        resource) dest="$mojang/resource_packs" ;;
+        behavior) dest="$mojang/behavior_packs" ;;
+        skin)     dest="$mojang/skin_packs" ;;
+        template) dest="$mojang/world_templates" ;;
+        *) echo skip >> "$tmp/done"; continue ;;
+      esac
+      mkdir -p "$dest"
+      n="$dest/$name"; [ -e "$n" ] && rm -rf "$n"   # same pack again: replace it (an update)
+      mv "$dir" "$n" && echo pack >> "$tmp/done"
+    done
+    n=$(grep -c '^world$' "$tmp/done" 2>/dev/null); worlds=$((worlds + ${n:-0}))
+    n=$(grep -c '^pack$' "$tmp/done" 2>/dev/null); packs=$((packs + ${n:-0}))
+    [ -f "$tmp/done" ] || skipped=$((skipped + 1))
+    rm -rf "$tmp"
+  done
+  log "add-ons imported: $packs packs, $worlds worlds, $skipped skipped"
+  if [ $((packs + worlds)) -eq 0 ]; then
+    echo "error|Nothing in those files looked like a Minecraft pack or world."
+    return 0
+  fi
+  echo "ok|Imported $packs pack(s) and $worlds world(s). Packs show up in Settings > Global Resources and when you create or edit a world (Behavior Packs / Resource Packs); worlds show up in Play."
+}
+
 config_dir() { printf '%s' "$(user_dir)/AppData/Local/Dungeons"; }
 
 cmd_open_saves() {
@@ -1629,6 +1728,7 @@ case "$cmd" in
   library)        cmd_library "$1" "$2" ;;
   catalog)        mkdir -p "$STATE" "$LOGS"; library_js; printf '%s\n' "$@" | catalog_rows ;;
   remove-game)    cmd_remove_game "$1" ;;
+  import-addons)  cmd_import_addons "$@" ;;
   delete-files)   cmd_delete_files "$1" ;;
   d3dmetal-license) cmd_d3dmetal_license ;;
   accept-d3dmetal) conf_set d3dmetal_license 1; echo "ok|accepted" ;;

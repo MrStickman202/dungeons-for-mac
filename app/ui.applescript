@@ -344,6 +344,7 @@ end acceptD3DMetal
 
 on gameMoreMenu(gameId, gameName)
 	set opts to {"Re-download / update", "Delete game files"}
+	if gameId is "bedrock" then set beginning of opts to "Import add-ons, packs or worlds..."
 	if gameId is not "dungeons" and gameId is not "bedrock" then
 		set end of opts to "Graphics..."
 		set end of opts to "Remove from the list"
@@ -351,7 +352,9 @@ on gameMoreMenu(gameId, gameName)
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt gameName & ":" OK button name "Select" cancel button name "Back"
 	if pick is false then return
 	set pick to item 1 of pick
-	if pick is "Graphics..." then
+	if pick starts with "Import add-ons" then
+		my importAddons()
+	else if pick is "Graphics..." then
 		set g to choose from list {"D3DMetal - DirectX 12 and 11 (works with most games)", "DXMT - DirectX 11 only (faster when the game is DirectX 11)"} with title "Dungeons for Mac" with prompt "Graphics for " & gameName & ":" OK button name "Use This" cancel button name "Back"
 		if g is not false then
 			if (item 1 of g) starts with "DXMT" then
@@ -446,6 +449,21 @@ on findGamesSteps()
 		end if
 	end repeat
 end findGamesSteps
+
+on importAddons()
+	try
+		set picked to choose file with prompt "Choose Minecraft add-ons, packs or worlds (.mcaddon, .mcpack, .mcworld, .mctemplate):" with multiple selections allowed
+	on error number errNum
+		return
+	end try
+	set argText to ""
+	repeat with f in picked
+		set argText to argText & " " & quoted form of (POSIX path of f)
+	end repeat
+	display notification "Importing into Minecraft Bedrock..." with title "Dungeons for Mac"
+	set r to my core("import-addons" & argText)
+	my dlg(my afterBar(r), {"OK"}, "OK")
+end importAddons
 
 on addStoreGame()
 	try

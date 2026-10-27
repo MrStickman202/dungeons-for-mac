@@ -47,6 +47,17 @@ jobs:
           /bin/bash app/core.sh set upscale 1.5 | grep -q '^ok'
           /bin/bash app/core.sh status | grep -qx 'upscale=1.5'
           /bin/bash app/core.sh reset-settings >/dev/null 2>&1 || true
+          # Bedrock add-on import: an .mcaddon with a behavior + resource pack, and an .mcworld
+          A="$RUNNER_TEMP/addon test"; mkdir -p "$A/bp" "$A/rp" "$A/w/db" "$DFM_HOME/prefix/drive_c/users/runner"
+          printf '{"format_version":2,"header":{"name":"Test BP","uuid":"a"},"modules":[{"type":"data"}]}' > "$A/bp/manifest.json"
+          printf '// comment\n{"format_version":2,"header":{"name":"\u00a7aTest RP","uuid":"b"},"modules":[{"type":"resources"}]}' > "$A/rp/manifest.json"
+          echo x > "$A/w/level.dat"
+          (cd "$A/bp" && zip -qr ../bp.mcpack .) && (cd "$A/rp" && zip -qr ../rp.mcpack .) && (cd "$A" && zip -q test.mcaddon bp.mcpack rp.mcpack) && (cd "$A/w" && zip -qr "../my world.mcworld" .)
+          /bin/bash app/core.sh import-addons "$A/test.mcaddon" "$A/my world.mcworld" | tee imp.txt
+          grep -q '^ok|Imported 2 pack(s) and 1 world(s)' imp.txt
+          M="$DFM_HOME/prefix/drive_c/users/runner/AppData/Roaming/Minecraft Bedrock/Users/Shared/games/com.mojang"
+          test -f "$M/behavior_packs/Test BP/manifest.json" && test -f "$M/resource_packs/Test RP/manifest.json"
+          ls "$M/minecraftWorlds"/*/level.dat
           # the wine shim under macOS's bash 3.2, with a stand-in wine
           printf '#!/bin/bash\nfor a in "$@"; do echo "[$a]"; done\n' > "$RUNNER_TEMP/fakewine"; chmod +x "$RUNNER_TEMP/fakewine"
           /bin/bash app/core.sh set display fullscreen >/dev/null
