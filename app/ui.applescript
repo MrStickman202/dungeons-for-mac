@@ -25,7 +25,11 @@ on corePath()
 end corePath
 
 on core(argText)
-	return do shell script "/bin/bash " & quoted form of (my corePath()) & " " & argText
+	-- some steps (restarting Steam, reading a big library) take minutes: don't let the
+	-- default two-minute AppleEvent limit end them with "AppleEvent timed out"
+	with timeout of 3600 seconds
+		return do shell script "/bin/bash " & quoted form of (my corePath()) & " " & argText
+	end timeout
 end core
 
 on dlg(msg, btns, defBtn)

@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=18   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=19   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1470,7 +1470,7 @@ steam_forward() {
   echo "== $(date '+%F %T') forward to Steam: $*" >> "$LOGS/steam.log"
   ( cd "$STEAM_ROOT" && exec "$WINE" "$STEAM_EXE" "$@" ) >> "$LOGS/steam.log" 2>&1 < /dev/null &
   pid=$!
-  while kill -0 "$pid" 2>/dev/null && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+  while kill -0 "$pid" 2>/dev/null && [ $i -lt "${STEAM_FORWARD_WAIT:-30}" ]; do sleep 1; i=$((i + 1)); done
   kill "$pid" 2>/dev/null
   return 0
 }
@@ -1478,9 +1478,9 @@ steam_forward() {
 steam_shutdown() { # ask Steam to quit, then end the environment
   use_steam_prefix
   if steam_running; then
-    steam_forward -shutdown
+    STEAM_FORWARD_WAIT=10 steam_forward -shutdown
     local i=0
-    while steam_running && [ $i -lt 25 ]; do sleep 1; i=$((i + 1)); done
+    while steam_running && [ $i -lt 15 ]; do sleep 1; i=$((i + 1)); done
   fi
   wait_server 15 || stop_server
   rm -f "$STEAM_MODE_FILE"
@@ -2093,7 +2093,9 @@ case "$cmd" in
   steam-renderer) cmd_steam_renderer "$1" "$2" ;;
   steam-renderer-get) steam_renderer "$1" ;;
   steam-quit)     steam_shutdown; echo "ok|Steam closed." ;;
-  steam-restart)  use_steam_prefix; steam_shutdown; stop_server; steam_start ui; echo "ok|Restarting Steam. Its window appears in a minute or two." ;;
+  steam-restart)  use_steam_prefix
+                  if steam_game_running; then echo "error|A game is running. Quit it first."
+                  else stop_server; rm -f "$STEAM_MODE_FILE"; steam_start ui; echo "ok|Restarting Steam. Its window appears in a minute or two."; fi ;;
   power-check)    if pmset -g 2>/dev/null | grep -qE 'lowpowermode[[:space:]]+1'; then echo lowpower; else echo ok; fi ;;
   delete-files)   cmd_delete_files "$1" ;;
   d3dmetal-license) cmd_d3dmetal_license ;;
