@@ -1435,7 +1435,8 @@ cmd_import_addons() { # files... -> ok|message
     find "$tmp/x" -type f -name level.dat 2>/dev/null | while IFS= read -r m; do
       dir=$(dirname "$m")
       mkdir -p "$worldsdir"
-      dest="$worldsdir/$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 12)"
+      dest="$worldsdir/$(/usr/bin/uuidgen 2>/dev/null | tr -d '-' | cut -c1-12)"
+      [ "$dest" != "$worldsdir/" ] || dest="$worldsdir/world$(date +%s)$$"
       mv "$dir" "$dest" && echo world >> "$tmp/done"
     done
     # packs: every remaining folder with a manifest.json
