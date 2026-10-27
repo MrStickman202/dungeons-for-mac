@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=16   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=17   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1871,6 +1871,11 @@ cmd_diag() {
     done
   } > "$dir/DungeonsForMac-diagnostics/summary.txt" 2>&1
   cp "$LOGS"/*.log "$dir/DungeonsForMac-diagnostics/" 2>/dev/null
+  # Steam's own logs (bootstrapper, web views, connection) when Steam is set up
+  for f in bootstrap_log.txt webhelper.txt connection_log.txt stderr.txt; do
+    tail -c 60000 "$STEAM_ROOT/logs/$f" > "$dir/DungeonsForMac-diagnostics/steam-$f" 2>/dev/null || rm -f "$dir/DungeonsForMac-diagnostics/steam-$f"
+  done
+  ps -axo pid,etime,rss,command 2>/dev/null | grep -i 'steam' | grep -v grep | cut -c1-200 > "$dir/DungeonsForMac-diagnostics/steam-processes.txt"
   # game search: what Microsoft listed (product IDs and entitlement types) and what was read from it
   head -c 40000 "$STATE/library.json" > "$dir/DungeonsForMac-diagnostics/library-owned.json" 2>/dev/null
   cp "$LIBRARY_CACHE" "$dir/DungeonsForMac-diagnostics/library.txt" 2>/dev/null
