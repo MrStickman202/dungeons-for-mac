@@ -223,7 +223,7 @@ on mainLoop()
 		else if currentStore is "steam" then
 			set r to my steamMenu()
 			if r is "quit" then return
-			if r is "switch" then set currentStore to "microsoft"
+			if r is "switch" then set currentStore to ""
 		else if (my valueFor(statusRaw, "signed_in")) is not "1" and (my valueFor(statusRaw, "game")) is not "1" then
 			set b to my dlg(my signInText(), {"Quit", "More...", "Sign In"}, "Sign In")
 			if b is "Quit" then return
@@ -236,7 +236,7 @@ on mainLoop()
 		else
 			set r to my gamesMenu()
 			if r is "quit" then return
-			if r is "switch" then set currentStore to "steam"
+			if r is "switch" then set currentStore to ""
 		end if
 	end repeat
 end mainLoop
@@ -269,11 +269,11 @@ on gamesMenu()
 	set end of opts to "Add a game by Store ID..."
 	set end of opts to "Settings..."
 	set end of opts to "More..."
-	set end of opts to "Switch to Steam..."
+	set end of opts to "Choose Steam or Microsoft Store..."
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Your Microsoft Store games:" default items {item 1 of opts} OK button name "Open" cancel button name "Quit"
 	if pick is false then return "quit"
 	set pick to item 1 of pick
-	if pick is "Switch to Steam..." then return "switch"
+	if pick is "Choose Steam or Microsoft Store..." then return "switch"
 	if pick is "Find games you own..." then
 		my findGames()
 		return "back"
@@ -566,13 +566,13 @@ on steamMenu()
 	set end of opts to "Settings..."
 	set end of opts to "Steam options..."
 	set end of opts to "More..."
-	set end of opts to "Switch to Microsoft Store..."
+	set end of opts to "Choose Steam or Microsoft Store..."
 	set promptText to "Your Steam games:"
 	if gameCount is 0 then set promptText to "No games yet. Steam fills this list after you sign in and its library loads; choose Open Steam, wait for your library, then Refresh."
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt promptText default items {item 1 of opts} OK button name "Open" cancel button name "Quit"
 	if pick is false then return "quit"
 	set pick to item 1 of pick
-	if pick is "Switch to Microsoft Store..." then return "switch"
+	if pick is "Choose Steam or Microsoft Store..." then return "switch"
 	if pick starts with "Open Steam" then
 		my dlg(my afterBar(my core("steam-open")), {"OK"}, "OK")
 		return "back"
@@ -647,11 +647,13 @@ end steamRendererLabel
 
 on steamOptions()
 	set steamRaw to my core("steam-status")
-	set opts to {"Steam overlay in games: " & my onOff(my valueFor(steamRaw, "overlay")), "Close Steam now", "Open Steam's download page"}
+	set opts to {"Restart Steam (if its window won't open)", "Steam overlay in games: " & my onOff(my valueFor(steamRaw, "overlay")), "Close Steam now", "Open Steam's download page"}
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Steam options:" OK button name "Select" cancel button name "Back"
 	if pick is false then return
 	set pick to item 1 of pick
-	if pick starts with "Steam overlay" then
+	if pick starts with "Restart Steam" then
+		my dlg(my afterBar(my core("steam-restart")), {"OK"}, "OK")
+	else if pick starts with "Steam overlay" then
 		if (my valueFor(steamRaw, "overlay")) is "1" then
 			my core("set steam_overlay 0")
 		else

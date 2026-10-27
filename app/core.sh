@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=17   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=18   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1518,12 +1518,24 @@ job_steamsetup() {
   if ! steam_bootstrapped || ! steam_running; then
     steam_running || steam_start ui
   fi
-  local t=0
+  local t=0 stuck=0
   while [ $t -lt 2700 ]; do
     if steam_bootstrapped && pgrep -if 'steamwebhelper' >/dev/null 2>&1; then break; fi
     if ! steam_running && [ $t -gt 60 ]; then
       log "Steam's first start stopped at $(fmt_time $t); starting it again (it resumes)"
+      stop_server
       steam_start ui
+      stuck=0
+    fi
+    # "Update complete, launching Steam..." that never gets further: the new client
+    # hung on its first start. Starting it again gets past it.
+    if steam_bootstrapped; then stuck=$((stuck + 5)); else stuck=0; fi
+    if [ $stuck -ge 360 ]; then
+      log "Steam hung after its update ($(fmt_time $t)); restarting it"
+      progress -1 "Steam got stuck starting; restarting it (that usually gets it going)..."
+      stop_server; sleep 2
+      steam_start ui
+      stuck=0
     fi
     progress -1 "Steam is downloading and unpacking its client - $(fmt_time $t) (usually 15-25 minutes, quiet stretches are normal)"
     sleep 5; t=$((t + 5))
@@ -1625,7 +1637,13 @@ cmd_steam_open() { # [steam:// url]  show Steam's window (sign in, store, downlo
   steam_installed || { echo "error|Set up Steam first."; return 0; }
   if mac_steam_running; then echo "error|Quit the Mac version of Steam first (Steam > Quit Steam), then try again. Two Steam clients on one account log each other out."; return 0; fi
   local url="${1:-steam://open/main}"
-  case "$(steam_mode)" in
+  local m; m=$(steam_mode)
+  # a client without its web views never shows a window (a hung start): replace it
+  if [ "$m" = ui ] && ! pgrep -if 'steamwebhelper' >/dev/null 2>&1; then
+    log "Steam was running without its window parts; restarting it"
+    use_steam_prefix; stop_server; rm -f "$STEAM_MODE_FILE"; m=off
+  fi
+  case "$m" in
     ui)  steam_forward "$url"; echo "ok|Steam's window is open." ;;
     off) steam_start ui "$url"; echo "ok|Opening Steam. A cold start takes a minute or two." ;;
     *)
@@ -2075,6 +2093,7 @@ case "$cmd" in
   steam-renderer) cmd_steam_renderer "$1" "$2" ;;
   steam-renderer-get) steam_renderer "$1" ;;
   steam-quit)     steam_shutdown; echo "ok|Steam closed." ;;
+  steam-restart)  use_steam_prefix; steam_shutdown; stop_server; steam_start ui; echo "ok|Restarting Steam. Its window appears in a minute or two." ;;
   power-check)    if pmset -g 2>/dev/null | grep -qE 'lowpowermode[[:space:]]+1'; then echo lowpower; else echo ok; fi ;;
   delete-files)   cmd_delete_files "$1" ;;
   d3dmetal-license) cmd_d3dmetal_license ;;
