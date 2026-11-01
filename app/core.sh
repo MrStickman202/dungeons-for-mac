@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=23   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=24   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1480,6 +1480,10 @@ steam_start() {
     game:*)
       GAME_RENDERER_FOR_LAUNCH="${mode#game:}"
       wine_env game
+      # Steam under msync never got past Wine's start on this Mac (the client sat
+      # at 1 MB for minutes), so Steam games run with sync off unless switched on
+      # in Steam options; Steam's own window needs it off anyway.
+      if [ "$(conf_get steam_msync 0)" != 1 ]; then export WINEMSYNC=0 WINEESYNC=0; fi
       # The Steam overlay hooks every frame, and under Wine it costs speed and
       # crashes some games: off unless the person turned it on.
       if [ "$(conf_get steam_overlay 0)" != 1 ]; then
@@ -1507,7 +1511,8 @@ steam_forward() {
   mode=$(cat "$STEAM_MODE_FILE" 2>/dev/null || echo ui)
   use_steam_prefix
   case "$mode" in
-    game:*) GAME_RENDERER_FOR_LAUNCH="${mode#game:}"; wine_env game ;;
+    game:*) GAME_RENDERER_FOR_LAUNCH="${mode#game:}"; wine_env game
+            if [ "$(conf_get steam_msync 0)" != 1 ]; then export WINEMSYNC=0 WINEESYNC=0; fi ;;
     *)      wine_env launcher ;;
   esac
   echo "== $(date '+%F %T') forward to Steam: $*" >> "$LOGS/steam.log"
@@ -1641,6 +1646,7 @@ cmd_steam_status() {
   echo "game_running=$(steam_game_running && echo 1 || echo 0)"
   echo "overlay=$(conf_get steam_overlay 0)"
   echo "gpu_window=$(conf_get steam_gpu_window 0)"
+  echo "msync=$(conf_get steam_msync 0)"
 }
 
 cmd_steam_games() { # [all] -> appid|name|state|percent   (state: ready, downloading, notinstalled)
@@ -1729,7 +1735,7 @@ cmd_steam_play() { # appid
   glog="$LOGS/game-$(date +%Y%m%d-%H%M%S).log"
   printf 'Dungeons for Mac %s (build %s) - Steam: %s (%s)\nrenderer=%s fps=%s upscale=%s dlss=%s sync=%s overlay=%s steam was %s\n----\n' \
     "$DFM_VERSION" "$DFM_BUILD" "$name" "$id" "$r" "$(conf_get fps 60)" "$(upscale_setting)" "$(conf_get metalfx 0)" \
-    "$(conf_get sync msync)" "$(conf_get steam_overlay 0)" "$mode" > "$glog"
+    "$( [ "$(conf_get steam_msync 0)" = 1 ] && echo msync || echo off)" "$(conf_get steam_overlay 0)" "$mode" > "$glog"
   # Always a fresh Steam for the game: handing the launch to a client that is
   # already up only works when that client is healthy, and a forward that finds
   # none quietly becomes a whole new Steam (which the forward's time limit then ended).
@@ -2081,7 +2087,7 @@ cmd_set() { # key value
     launch)   case "$v" in direct|bootstrap) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     args)     ;;
     display)  case "$v" in game|windowed|fullscreen|exclusive) ;; *) echo "error|bad value"; return 0 ;; esac ;;
-    steam_overlay|steam_gpu_window) case "$v" in 0|1) ;; *) echo "error|bad value"; return 0 ;; esac ;;
+    steam_overlay|steam_gpu_window|steam_msync) case "$v" in 0|1) ;; *) echo "error|bad value"; return 0 ;; esac ;;
     *) echo "error|unknown setting"; return 0 ;;
   esac
   conf_set "$k" "$v"

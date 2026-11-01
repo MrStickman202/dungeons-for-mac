@@ -313,7 +313,7 @@ on gameMenu(gameId, gameName, gameState)
 	end if
 	set b to my dlg(gameName & return & return & "Ready to play." & my gameExtraText(gameId), {"Back", "More...", "Play"}, "Play")
 	if b is "Play" then
-		if my startStoreGame(gameId, gameName) then return "quit"
+		if my startStoreGame(gameId, gameName) then my waitWhilePlaying()
 	else if b is "More..." then
 		my gameMoreMenu(gameId, gameName)
 	end if
@@ -329,6 +329,27 @@ end gameExtraText
 on bedrockNote()
 	return "Minecraft Bedrock is experimental here. It uses DirectX 12, which runs on Apple's D3DMetal from the Game Porting Toolkit. The first launch asks you to accept Apple's licence for it."
 end bedrockNote
+
+-- After Play the window stays open but out of the way: it waits for the game to
+-- take the screen, then waits until you click Dungeons for Mac (Dock or Cmd+Tab)
+-- before showing your games again, so no list pops up over the game.
+on waitWhilePlaying()
+	set myPath to POSIX path of (path to me)
+	set t to 0
+	repeat while t < 300
+		delay 1
+		set t to t + 1
+		try
+			if (POSIX path of (path to frontmost application)) is not myPath then exit repeat
+		end try
+	end repeat
+	repeat
+		delay 1
+		try
+			if (POSIX path of (path to frontmost application)) is myPath then exit repeat
+		end try
+	end repeat
+end waitWhilePlaying
 
 on powerOK()
 	if (my core("power-check")) is "lowpower" then
@@ -346,7 +367,7 @@ on startStoreGame(gameId, gameName)
 		set r to my core("play " & quoted form of gameId)
 	end if
 	if r starts with "ok" then
-		display notification "Starting " & gameName & ". The first launch can take a minute or two." with title "Dungeons for Mac"
+		display notification "Starting " & gameName & ". The first launch can take a minute or two. Click Dungeons for Mac in the Dock to come back to your games." with title "Dungeons for Mac"
 		return true
 	else if r starts with "running" then
 		my dlg(my afterBar(r), {"OK"}, "OK")
@@ -638,8 +659,9 @@ on steamGameMenu(appId, gameName, gameState)
 			set r to my core("steam-play " & appId)
 		end if
 		if r starts with "ok" then
-			display notification "Starting " & gameName & ". With Steam starting in the background, it can take a couple of minutes." with title "Dungeons for Mac"
-			return "quit"
+			display notification "Starting " & gameName & ". With Steam starting in the background, it can take a couple of minutes. Click Dungeons for Mac in the Dock to come back to your games." with title "Dungeons for Mac"
+			my waitWhilePlaying()
+			return "back"
 		end if
 		my dlg(my afterBar(r), {"OK"}, "OK")
 	else if b is "More..." then
@@ -674,12 +696,19 @@ on steamOptions()
 	set steamRaw to my core("steam-status")
 	set winMode to "Software (works here)"
 	if (my valueFor(steamRaw, "gpu_window")) is "1" then set winMode to "GPU (Steam's default)"
-	set opts to {"Restart Steam (if its window won't open)", "Steam window drawing: " & winMode, "Steam overlay in games: " & my onOff(my valueFor(steamRaw, "overlay")), "Close Steam now", "Open Steam's download page"}
+	set opts to {"Restart Steam (if its window won't open)", "Steam window drawing: " & winMode, "Fast sync for Steam games (msync): " & my onOff(my valueFor(steamRaw, "msync")), "Steam overlay in games: " & my onOff(my valueFor(steamRaw, "overlay")), "Close Steam now", "Open Steam's download page"}
 	set pick to choose from list opts with title "Dungeons for Mac" with prompt "Steam options:" OK button name "Select" cancel button name "Back"
 	if pick is false then return
 	set pick to item 1 of pick
 	if pick starts with "Restart Steam" then
 		my dlg(my afterBar(my core("steam-restart")), {"OK"}, "OK")
+	else if pick starts with "Fast sync" then
+		if (my valueFor(steamRaw, "msync")) is "1" then
+			my core("set steam_msync 0")
+		else
+			set b to my dlg("msync makes many games noticeably faster, but on this Mac Steam didn't start with it (it stayed stuck before Windows finished starting). Turn it on only to test; if a game then doesn't open, turn it off again.", {"Back", "Turn On"}, "Back")
+			if b is "Turn On" then my core("set steam_msync 1")
+		end if
 	else if pick starts with "Steam window drawing" then
 		if (my valueFor(steamRaw, "gpu_window")) is "1" then
 			my core("set steam_gpu_window 0")
