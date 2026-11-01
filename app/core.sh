@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=22   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=23   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -1730,12 +1730,10 @@ cmd_steam_play() { # appid
   printf 'Dungeons for Mac %s (build %s) - Steam: %s (%s)\nrenderer=%s fps=%s upscale=%s dlss=%s sync=%s overlay=%s steam was %s\n----\n' \
     "$DFM_VERSION" "$DFM_BUILD" "$name" "$id" "$r" "$(conf_get fps 60)" "$(upscale_setting)" "$(conf_get metalfx 0)" \
     "$(conf_get sync msync)" "$(conf_get steam_overlay 0)" "$mode" > "$glog"
-  if [ "$mode" = "game:$r" ]; then
-    # the client already runs the way this game wants: hand it the launch
-    # shellcheck disable=SC2086
-    steam_forward $args
-  else
-    # Steam's window (sync off) or another graphics stack: start Steam again for the game
+  # Always a fresh Steam for the game: handing the launch to a client that is
+  # already up only works when that client is healthy, and a forward that finds
+  # none quietly becomes a whole new Steam (which the forward's time limit then ended).
+  if true; then
     [ "$mode" = off ] || steam_shutdown
     stop_server
     apply_dlss_settings
