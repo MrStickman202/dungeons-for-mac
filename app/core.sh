@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=21   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=22   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -259,11 +259,18 @@ wait_server() { # [max seconds]  wait for the prefix's Windows session to end
   return 0
 }
 
-stop_server() { # end every Windows program in the prefix
+stop_server() { # end every Windows program in the prefix, and the wineserver with it
   [ -x "$WINESERVER" ] || return 0
   [ -d "$PREFIX" ] || return 0
   WINEPREFIX="$PREFIX" "$WINESERVER" -k >/dev/null 2>&1
-  wait_server 15
+  if ! wait_server 15; then
+    # Something ignored the polite stop (Steam's browser often does). A server
+    # left running keeps its sync mode, and a game started with another one then
+    # never gets past Windows' boot ("boot event wait timed out"), so force it.
+    log "wineserver still running after 15 s; forcing it to stop"
+    WINEPREFIX="$PREFIX" "$WINESERVER" -k9 >/dev/null 2>&1
+    wait_server 10 || log "wineserver still running after a forced stop"
+  fi
   return 0
 }
 
