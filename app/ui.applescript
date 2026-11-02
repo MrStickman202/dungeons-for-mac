@@ -669,10 +669,15 @@ on steamGameMenu(appId, gameName, gameState)
 		if pick is false then return "back"
 		set pick to item 1 of pick
 		if pick is "Graphics..." then
-			set g to choose from list {"DXMT - DirectX 11 (fastest, most games; Green Hell uses this)", "D3DMetal - DirectX 12 and 11 (for DirectX 12 games)"} with title "Dungeons for Mac" with prompt "Graphics for " & gameName & ":" OK button name "Use This" cancel button name "Back"
+			set g to choose from list {"DXMT - DirectX 11 games (fastest)", "D3DMetal - DirectX 12 games (also does 11)", "DXVK - DirectX 9 games, and 10/11 when DXMT has problems", "WineD3D - OpenGL, slowest, for very old games or as a last resort"} with title "Dungeons for Mac" with prompt "Graphics for " & gameName & ":" OK button name "Use This" cancel button name "Back"
 			if g is not false then
-				if (item 1 of g) starts with "D3DMetal" then
+				set g to item 1 of g
+				if g starts with "D3DMetal" then
 					my core("steam-renderer " & appId & " d3dmetal")
+				else if g starts with "DXVK" then
+					my core("steam-renderer " & appId & " dxvk")
+				else if g starts with "WineD3D" then
+					my core("steam-renderer " & appId & " wined3d")
 				else
 					my core("steam-renderer " & appId & " dxmt")
 				end if
@@ -689,6 +694,8 @@ end steamGameMenu
 on steamRendererLabel(appId)
 	set r to do shell script "/bin/bash " & quoted form of (my corePath()) & " steam-renderer-get " & appId
 	if r is "d3dmetal" then return "D3DMetal (DirectX 12)"
+	if r is "dxvk" then return "DXVK (DirectX 9-11 through Vulkan)"
+	if r is "wined3d" then return "WineD3D (OpenGL)"
 	return "DXMT (DirectX 11)"
 end steamRendererLabel
 

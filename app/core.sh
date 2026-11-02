@@ -11,7 +11,7 @@
 # no ${var,,}, no set -u.
 
 DFM_VERSION="1.0.0"
-DFM_BUILD=24   # bumped by every app release; the launcher prefers the higher one
+DFM_BUILD=25   # bumped by every app release; the launcher prefers the higher one
 
 SELF="$0"
 case "$SELF" in /*) ;; *) SELF="$PWD/$SELF" ;; esac
@@ -190,6 +190,8 @@ wine_env() { # setup | game | launcher
       r=$(conf_get renderer dxmt)
       # A DirectX 12 game always takes D3DMetal; the Graphics setting is for DirectX 11 ones
       [ "${GAME_RENDERER_FOR_LAUNCH:-}" = d3dmetal ] && r=d3dmetal
+      # a Steam game's own Graphics choice wins over the global one
+      [ -n "${GAME_RENDERER_EXPLICIT:-}" ] && [ -n "${GAME_RENDERER_FOR_LAUNCH:-}" ] && r="$GAME_RENDERER_FOR_LAUNCH"
       case "$r" in
         d3dmetal)
           # D3DMetal for 64-bit Direct3D 11/12, DXMT behind it for 32-bit Direct3D 11
@@ -1478,7 +1480,7 @@ steam_start() {
       wine_env launcher
       ;;
     game:*)
-      GAME_RENDERER_FOR_LAUNCH="${mode#game:}"
+      GAME_RENDERER_FOR_LAUNCH="${mode#game:}"; GAME_RENDERER_EXPLICIT=1
       wine_env game
       # Steam under msync never got past Wine's start on this Mac (the client sat
       # at 1 MB for minutes), so Steam games run with sync off unless switched on
@@ -1511,7 +1513,7 @@ steam_forward() {
   mode=$(cat "$STEAM_MODE_FILE" 2>/dev/null || echo ui)
   use_steam_prefix
   case "$mode" in
-    game:*) GAME_RENDERER_FOR_LAUNCH="${mode#game:}"; wine_env game
+    game:*) GAME_RENDERER_FOR_LAUNCH="${mode#game:}"; GAME_RENDERER_EXPLICIT=1; wine_env game
             if [ "$(conf_get steam_msync 0)" != 1 ]; then export WINEMSYNC=0 WINEESYNC=0; fi ;;
     *)      wine_env launcher ;;
   esac
@@ -1711,8 +1713,8 @@ cmd_steam_uninstall() { cmd_steam_open "steam://uninstall/$1"; }
 
 steam_renderer() { conf_get "steam_r_$1" dxmt; }
 
-cmd_steam_renderer() { # appid dxmt|d3dmetal
-  case "$2" in dxmt|d3dmetal) conf_set "steam_r_$1" "$2"; echo "ok|$2" ;; *) echo "error|unknown graphics option" ;; esac
+cmd_steam_renderer() { # appid dxmt|d3dmetal|dxvk|wined3d
+  case "$2" in dxmt|d3dmetal|dxvk|wined3d) conf_set "steam_r_$1" "$2"; echo "ok|$2" ;; *) echo "error|unknown graphics option" ;; esac
 }
 
 cmd_steam_play() { # appid
